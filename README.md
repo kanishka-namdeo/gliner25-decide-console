@@ -2,6 +2,7 @@
 
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.12-blue)](pyproject.toml)
+[![protocol](https://img.shields.io/badge/protocol-arXiv%3A2608.20371-blue)](https://arxiv.org/abs/2608.20371)
 
 A local app for demonstrating what [`fastino/GLiNER2.5-Decide`](https://huggingface.co/fastino/GLiNER2.5-Decide)
 is good at, and just as importantly, where it is not.
@@ -22,6 +23,24 @@ Three surfaces, one engine:
 2. **Evidence panel** — run every available system over identical items and
    compare with confidence intervals and significance tests.
 3. **Schema swap** — the experiment that justifies a schema-driven model.
+
+## Architecture
+
+One engine behind three surfaces, plus the evaluation protocol that makes the
+comparison mean something.
+
+**[Open the architecture diagram →](docs/architecture.html)** — a self-contained
+interactive rendering, committed to the repo. No build step, no external assets,
+no network: open the file in a browser. Its source is
+[`docs/architecture.source.json`](docs/architecture.source.json), pinned to the
+commit it was generated from.
+
+In short: the browser posts to one FastAPI process, which slices a fixture
+**once** so every system scores identical items in identical order, hands that
+slice to three independent arms — the encoder, supervised baselines, and an
+optional LLM — and scores every arm with the same protocol. The LLM endpoint is
+the only component that reaches outside the machine, and it is the only place a
+credential lives.
 
 ## The honest finding
 
@@ -95,13 +114,18 @@ evidence:
 Python 3.12, CUDA, and a `.venv`. Nothing installs into system Python.
 
 ```powershell
-uv sync                      # creates .venv on a uv-managed CPython 3.12
-python scripts/fetch_model.py            # ~1.9 GB, resumable
-python scripts/fetch_fixtures.py --with-train
-python scripts/verify_env.py    # 8 environment assertions
-python scripts/verify_model.py  # API behaviour vs the model card
+uv sync --extra dev         # creates .venv on a uv-managed CPython 3.12
+uv run python scripts/fetch_model.py            # ~1.9 GB, resumable
+uv run python scripts/fetch_fixtures.py --with-train
+uv run python scripts/verify_env.py    # 8 environment assertions
+uv run python scripts/verify_model.py  # API behaviour vs the model card
 uv run uvicorn app.main:app --port 8765
 ```
+
+`--extra dev` is what installs pytest, so drop it only if you never intend to run
+the tests. The scripts go through `uv run` because `verify_env.py` asserts you
+are inside the project `.venv` and fails deliberately when you are not — that
+assertion is the point of the gate.
 
 ### Two constraints worth knowing
 
@@ -139,11 +163,35 @@ a number.
 conversation should be treated as exposed and rotated.
 
 **The LLM arm is slow — budget for it.** Measured at 6-7 s per call, so a
-300-item row takes ~16 minutes at concurrency 4. The UI caps the item count when
-the arm is selected, and the panel reports the per-item cost. Token prices
-default to 0 and display as unpriced; set `LLM_INPUT_PER_MTOK` and
-`LLM_OUTPUT_PER_MTOK` for your endpoint rather than trusting a figure that will go
-stale.
+300-item row takes ~15 minutes at concurrency 4. When the arm is selected above
+120 items the UI stops the run and offers two buttons: drop to 120, or proceed at
+the number you asked for. It is a deliberate confirmation, not a hard cap — a
+silent cap would be a policy the operator cannot see. The panel then reports the
+per-item cost in its notes. Token prices default to 0 and render as `unpriced`,
+which is not the same claim as free; set `LLM_INPUT_PER_MTOK` and
+`LLM_OUTPUT_PER_MTOK` for your endpoint rather than trusting a figure that will
+go stale.
+
+## Verification
+
+Three gates, cheapest first. The offline suite is the one to run while editing.
+
+```powershell
+uv run pytest tests -q                  # 87 tests, no GPU, no network
+uv run python scripts/verify_env.py     # 8 environment assertions
+uv run python scripts/verify_model.py   # loads ~1.9 GB, checks the model card's examples
+```
+
+`pytest tests -q` needs no weights, no fixtures and no GPU, and it is the only
+gate that runs in CI on every push. It covers the statistics, the LLM reply
+parsing, the `/api/*` response shapes, and static checks on the UI's wiring —
+including that every panel field is *both* sent by the backend and read by the
+renderer, which is the check that would have caught the `p95_ms` disappearance.
+
+`verify_env.py` and `verify_model.py` are local gates by design. They need a real
+CUDA device and the fetched checkpoint, so they stay out of CI; run both before
+opening a pull request that touches dependencies, the engine, or the device
+policy.
 
 ## Fixtures
 
@@ -169,8 +217,10 @@ Two data notes that changed results:
 
 ## Measured behaviour
 
-- p50 latency is **52 ms** for a 77-label schema, 44 ms for 9 labels, on one
-  RTX 2070 Super in fp16 — a 10.7x speedup over CPU (480 ms).
+- p50 latency is **52 ms** for a 77-label schema and **44 ms** for 9 labels, on
+  one RTX 2070 Super in fp16. Against a measured 480 ms CPU p50 that is a **9.2x**
+  speedup at 77 labels and **10.9x** at 9 labels. One multiplier cannot describe
+  both, so both are given.
 - fp16 and CPU produce **identical labels**, confidences agreeing to four
   decimals. Verified, not assumed.
 - **Label descriptions are free on small schemas and expensive on large ones**:
@@ -180,13 +230,17 @@ Two data notes that changed results:
 - Batching is nearly pointless on CPU (1.2x) and better on GPU; batch 8–16 is
   the sweet spot, batch 32 is slower.
 - The LLM arm costs **6-7 s per call** against a real endpoint, ~2.9 s/item at
-  concurrency 4. That is ~140x the encoder's p50 and the reason the UI caps item
-  count for that arm.
+  concurrency 4. Per item that is ~44x the encoder's 66 ms p50 on the same slice;
+  per call it is ~142x (9,363 ms against 66 ms). The per-call figure is the one
+  that matters for the item-count confirmation, because that is what the operator
+  waits for.
 - LLM replies are normalised before scoring: case, quotes, separators and a
-  short lead-in are treated as the same answer. Observed from the live endpoint:
-  it answered `Refund_not_showing_up` where the schema said
-  `refund_not_showing_up`. An invented label outside the schema is still scored
-  wrong — loosening the parser must not also inflate the arm.
+  short lead-in are treated as the same answer. A live endpoint returned
+  `Refund_not_showing_up` where the schema's label differed only in casing —
+  banking77 ships that intent capitalised. Both directions are covered by the
+  regression test, because which side capitalises is the endpoint's choice, not
+  this repo's. An invented label outside the schema is still scored wrong —
+  loosening the parser must not also inflate the arm.
 
 ## Layout
 
@@ -196,18 +250,31 @@ app/
   engine.py     model wrapper: device policy, fp16, parsing, disk cache
   fixtures.py   fixture loading and schema construction
   metrics.py    bootstrap CIs, paired bootstrap, exact McNemar, macro-F1, floor
-  baselines.py  TF-IDF, MiniLM+LR, fine-tuned RoBERTa, learning curve
+  baselines.py  TF-IDF, MiniLM+LR, fine-tuned RoBERTa
   evaluate.py   panel orchestration and the schema-swap experiment
   llm.py        OpenAI-compatible client
   static/       single-file UI, no build step
+docs/
+  architecture.html          committed architecture diagram, self-contained
+  architecture.source.json   its source, pinned to the commit it came from
 scripts/
   verify_env.py     8 environment assertions (CUDA, arch list, fp16, pins)
   verify_model.py   API behaviour against the model card's documented examples
   fetch_model.py    resumable weight download (uv and hf_hub restart from zero)
   fetch_fixtures.py dataset sampling and manifests
 tests/
-  test_core.py      48 offline tests: parsing, metrics, degenerate cases
+  test_core.py         60 offline tests: parsing, metrics, degenerate cases,
+                       and the /api/* response shapes via TestClient
+  test_ui_contract.py  27 static checks on the single-file UI: element id
+                       uniqueness, that every id the script writes to exists,
+                       that each panel field is both sent and read, and that the
+                       renderers have not reintroduced a fabricated price or a
+                       client-side verdict
 ```
+
+`baselines.py` also contains a `build_learning_curve()` that no route, panel arm
+or UI surface currently calls. It is library code, not a shipped feature, and it
+contributes to no number in this README.
 
 Predictions cache to `results/` keyed by a schema fingerprint, so re-running a
 sweep is instant. Change a label set and the fingerprint changes, so a stale

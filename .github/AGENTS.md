@@ -12,8 +12,10 @@ project actually has rather than to exercise the whole app.
 
 ## Local Contracts
 
-- `tests` job: CPU only, no network, `ubuntu-latest`. `uv sync --extra dev` then
-  `uv run pytest tests -q`. Fast, and always meaningful.
+- `tests` job: CPU only, no GPU, no weights, no fixtures, `ubuntu-latest`. The
+  `uv sync --extra dev` step does use the network, like any install; the
+  *test run* is the offline part, and it needs no network of its own. Fast, and
+  always meaningful.
 - `resolution` job: exists because neither dependency trap shows up in a CPU
   test run. It asserts `torch.version.cuda is not None` — the default PyPI wheel
   is CPU-only, so `[tool.uv.sources]` must keep pointing at

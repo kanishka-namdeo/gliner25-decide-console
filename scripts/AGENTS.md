@@ -51,9 +51,13 @@ the pins the gates assert, so the two are changed together or not at all.
 - `fetch_fixtures.py` owns the label-id-to-name mapping, and that mapping is
   load-bearing: handed a raw id like `"61"` instead of `card_lost`, the model has
   nothing to condition on.
-- Every fixture written must carry a manifest with resolved label names, label
-  counts, class counts, and source. The UI reads it, and it must never be made
-  to render an integer id.
+- Every evaluated fixture written must carry a manifest with resolved label
+  names, label counts, class counts, and source. The UI reads it, and it must
+  never be made to render an integer id. The `--with-train` splits are the
+  exception and write only `<name>_train.csv`: they are supervised input with no
+  label vocabulary of their own, and `fixtures.available()` globs
+  `*.manifest.json`, so a sibling manifest would advertise a fixture that does
+  not exist.
 - Sampling is shuffled with a fixed seed so a truncated fixture still covers
   every label rather than only the early ids.
 - Record the reason a non-obvious dataset decision was made in the spec entry.
@@ -61,8 +65,13 @@ the pins the gates assert, so the two are changed together or not at all.
 
 ## Verification
 
-- `python scripts/verify_env.py` — 8 assertions, must pass before any app work.
-- `python scripts/verify_model.py` — must pass before a pull request touching the
-  engine, the device policy, or schema shapes.
+- `uv run python scripts/verify_env.py` - 8 assertions, must pass before any app
+  work. Invoke it through `uv run`: it asserts you are inside the project `.venv`
+  and exits non-zero otherwise, so a bare `python` fails the gate by design.
+- `uv run python scripts/verify_model.py` - must pass before a pull request
+  touching the engine, the device policy, or schema shapes. It loads the
+  ~1.9 GB checkpoint and checks the model card's documented examples. Note it
+  covers the plain and multi-label schema forms but **not** the described-labels
+  form; that one is only exercised by a real banking77 run.
 - `uv run pytest tests -q` after changing `verify_env.py` criteria, since CI
   asserts the same pins independently.

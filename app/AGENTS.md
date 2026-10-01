@@ -22,7 +22,7 @@ list), `GET /api/fixtures/{name}` (inspect one fixture), `GET /api/llm/probe`
 | `engine.py` | `DecisionEngine`: device policy, fp16, response parsing, timing, disk cache |
 | `evaluate.py` | panel orchestration, per-system arms, artifact caching, the schema-swap experiment |
 | `metrics.py` | the evaluation protocol: exact-set match, bootstrap CIs, paired bootstrap, exact McNemar, macro-F1, majority floor |
-| `baselines.py` | supervised comparison arms — TF-IDF, MiniLM+LR, fine-tuned RoBERTa, learning curve |
+| `baselines.py` | supervised comparison arms — TF-IDF, MiniLM+LR, fine-tuned RoBERTa. Also holds `build_learning_curve()`, which no route, panel arm or UI surface calls: library code, not a shipped feature, and it feeds no reported number |
 | `fixtures.py` | fixture loading and schema construction |
 | `llm.py` | OpenAI-compatible `/chat/completions` client, config, reply parsing, pricing |
 | `static/` | the browser UI, governed by its own AGENTS.md |
@@ -47,11 +47,21 @@ list), `GET /api/fixtures/{name}` (inspect one fixture), `GET /api/llm/probe`
   GPU is Turing sm_75, so fp16 is the only mixed-precision option available.
 - `from_pretrained` may reject `quantize` depending on signature. Catch
   `TypeError` and retry without it rather than dying.
-- Attention stays eager. DeBERTa-v2 rejects SDPA in transformers 4.x.
+- Attention is **not** forced. `from_pretrained` is never passed
+  `attn_implementation`, so the checkpoint's own `config.json` decides — `sdpa`
+  for this release — and transformers may still fall back from there. Do not add
+  a hard-coded implementation here. `info()` used to return a literal
+  `"eager (DeBERTa-v2 rejects sdpa in transformers 4.x)"`, so `/api/health`
+  advertised a configuration the app never obtained; it now reads the resolved
+  value off the loaded encoder and says so plainly when nothing is resolved yet.
 - `info()` reports only capabilities actually obtained. It must never claim fp16
   on a CPU run, and it must never advertise a capability the app did not get.
-- CPU fallback is supported and roughly 20x slower. The UI says so rather than
-  pretending otherwise.
+  `tests/test_core.py` asserts no attention literal exists in `info()` at all,
+  because a test asserting "eager is correct" would pass straight back if the
+  checkpoint switched to sdpa.
+- CPU fallback is supported and roughly 9x slower on the 77-label schema
+  (480 ms against 52 ms p50; 10.9x at 9 labels, since one multiplier cannot
+  describe both). The UI says so rather than pretending otherwise.
 
 ### Timing
 
@@ -64,7 +74,10 @@ list), `GET /api/fixtures/{name}` (inspect one fixture), `GET /api/llm/probe`
 
 ### Schema shapes
 
-Three forms, all verified by `scripts/verify_model.py`:
+Three forms, all reachable from the app. Only the first and third are exercised
+by `scripts/verify_model.py`; the described-labels form is what
+`fixtures.Fixture.schema()` builds on banking77 and is **not** covered by that
+gate, so a regression in it would pass CI unnoticed:
 
 ```
 {"intent": ["a", "b"]}                                 # single label
@@ -77,7 +90,15 @@ Three forms, all verified by `scripts/verify_model.py`:
   exactly the set the gold labels came from. Otherwise the evaluation is not
   honest.
 - `classify_text` returns several shapes depending on the head. `engine._parse`
-  normalises them; keep that the single normalisation point.
+  normalises them; keep that the single normalisation point. `/api/route` goes
+  through `engine.classify_one` for exactly this reason and must not call
+  `.model.classify_text` directly.
+- **Never pass `include_confidence` positionally to `classify_text`.** The third
+  positional parameter is `threshold`. A positional `True` therefore means
+  "threshold 1.0" and silently drops every confidence, and the router rendered
+  a dash for every prediction until it was caught. `tests/test_core.py` stubs
+  the engine with no `.model` attribute specifically so this cannot regress
+  quietly.
 - Label sets above 512 are rejected at the request boundary.
 
 ### Caching
@@ -106,6 +127,12 @@ enforced by these mechanisms:
 - The majority-class floor is always appended when a majority label exists.
 - A system that cannot run goes into `unavailable` with a reason. It never
   contributes a fabricated number.
+- `SystemResult.cost_status` is part of the contract and the client branches on
+  it. A null `cost_per_1k_usd` is ambiguous: `free` means a local arm with no
+  marginal inference cost, `unpriced` means the LLM arm was measured but no
+  token price is configured. The UI once rendered both as `$0.00`, which reads
+  as free and understates the LLM arm by an unknown amount. Decide the state
+  here; never let the client infer it from a null.
 - Label descriptions are cheap on small schemas and expensive on large ones —
   measured ~8.6x slower at 77 labels. The panel warns above 25 labels instead of
   letting the latency column surprise the reader.
@@ -130,9 +157,11 @@ enforced by these mechanisms:
 - `_extract_label` normalises cosmetic variants of a real label — case,
   quotes, code fences, `-` vs `_`, a short lead-in ("The answer is X"), and
   positional indices — because those are the same answer. Observed live: the
-  endpoint answered `Refund_not_showing_up` where the schema said
-  `refund_not_showing_up`. An invented label outside the schema stays invalid;
-  that is a genuine error, not a formatting quirk.
+  endpoint returned a capitalised variant of a banking77 intent. Both
+  capitalisation directions are covered, because banking77 ships
+  `Refund_not_showing_up` while a hand-written schema may spell it lowercase and
+  which side capitalises is the endpoint's choice. An invented label outside the
+  schema stays invalid; that is a genuine error, not a formatting quirk.
 - Match a lead-in only at a separator boundary (the reply must **end** with
   `_<label>`). Splitting on `_` destroys compound labels: it turns
   `card_pin_change` into `card`/`pin`/`change`, which never matches. Matching on
@@ -147,12 +176,16 @@ enforced by these mechanisms:
   invites rate limiting.
 - Long runs report their per-item cost in `notes` so an operator can choose a
   smaller item count deliberately rather than assuming a hang.
-- The UI caps the item count above 120 when the LLM arm is selected and says why.
-  Do not raise that ceiling without re-measuring.
-- Credentials come from `.env`, read by `load_env_file()`. It is hand-rolled on
-  purpose: one more dependency to pin for six lines is a bad trade. Environment
-  variables win over the file so an operator can override a bad key locally.
-  Never log or return the key value; `status()` names missing variables only.
+- The UI stops a run above 120 items when the LLM arm is selected and offers
+  two buttons: drop to 120, or proceed at the requested number. That is a
+  deliberate confirmation, not a hard cap — `app/static/AGENTS.md` owns the
+  consent wording. Do not raise the threshold without re-measuring.
+- Credentials come from `.env`, read by `load_env_file()` from
+  `LLMConfig.from_env()` on first use, not at import. It is hand-rolled on
+  purpose: one more dependency to pin for a dozen lines is a bad trade.
+  Environment variables win over the file so an operator can override a bad key
+  locally. Never log or return the key value; `status()` names missing variables
+  only.
 - Result order must match input order regardless of completion order, because the
   paired significance tests assume identical item ordering.
 - Unusable replies count as wrong, and the count is reported.
@@ -161,9 +194,9 @@ enforced by these mechanisms:
 ### HTTP layer
 
 - The API is async; blocking work runs through `asyncio.to_thread`.
-- Progress callbacks passed into `run_llm` must be **sync**. `run_llm` awaits
-  `progress()` while holding a lock, so an async callback would be created and
-  never awaited.
+- Progress callbacks passed into `run_llm` must be **sync**. `run_llm` calls
+  `progress()` while holding a lock and never awaits it, so an async callback
+  would be created and never awaited.
 - Report unsupported or unavailable states as data carrying a reason, not as a
   missing section and not as an invented number.
 
@@ -181,7 +214,9 @@ enforced by these mechanisms:
 
 ## Verification
 
-- `uv run pytest tests -q` covers `metrics.py` and `llm.py` parsing offline.
+- `uv run pytest tests -q` covers `metrics.py` and `llm.py` parsing offline, the
+  `/api/*` response shapes via `TestClient`, and the UI's static wiring via
+  `tests/test_ui_contract.py`.
 - `python scripts/verify_env.py` and `python scripts/verify_model.py` gate any
   change to the device policy or schema handling in `engine.py`.
 - Changes to `evaluate.py`, `baselines.py`, or `fixtures.py` need a real GPU run

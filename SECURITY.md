@@ -41,15 +41,24 @@ port as fully trusted.
 
 ## Data handling
 
-All inference is local. Model weights and datasets are downloaded from Hugging
-Face; text sent to `/api/route` is processed in-process and is not forwarded
-anywhere — with the single exception of the LLM comparison arm, which sends the
-text to whichever endpoint `LLM_BASE_URL` names. **Anything you paste into the
-Router tab is sent to that endpoint when the LLM arm is enabled.** Do not use
-the LLM arm with confidential input.
+Inference is local. Model weights and datasets are downloaded from Hugging Face.
+
+Text sent to `/api/route` and `/api/schema-swap` is processed in-process and is
+**never forwarded anywhere** — neither endpoint reaches the LLM client at all.
+
+The one exception is `/api/panel`, and only when `llm` is among the systems you
+select. That arm sends each item to whichever endpoint `LLM_BASE_URL` names,
+under `Authorization: Bearer $LLM_API_KEY`. Nothing leaves the machine until you
+request that run; the arm is opt-in per panel run, and an unconfigured arm
+reports itself unavailable with the missing variable names rather than silently
+skipping. Do not include confidential input in a panel run that has the LLM arm
+enabled.
 
 ## Dependencies
 
 `gliner2` and the model weights are Apache-2.0; see `NOTICE` for the full
 attribution. Model weights are downloaded at run time and are not redistributed
-here. Run `uv sync` against a pinned `uv.lock` for a reproducible environment.
+here. Run `uv sync --extra dev` against a pinned `uv.lock` for a reproducible
+environment. CI runs the offline suite on every push and additionally resolves
+the pinned CUDA `torch` and asserts the `transformers` 4.x cap, because neither
+dependency trap is visible from a CPU test run.
