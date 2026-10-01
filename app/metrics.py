@@ -209,6 +209,16 @@ class SystemResult:
     p50_ms: float | None = None
     p95_ms: float | None = None
     cost_per_1k_usd: float | None = None
+    # Why cost_per_1k_usd is what it is. A null price is ambiguous on its own:
+    # for a local encoder it means the arm genuinely costs nothing at inference,
+    # while for the LLM arm it means nobody supplied a token price. The client
+    # used to render both as "$0.00", which reads as free and understates the
+    # LLM arm's cost by an unknown amount. The state is decided here so the UI
+    # reports it rather than infers it.
+    #   "free"     - runs locally, no marginal inference cost
+    #   "priced"   - cost_per_1k_usd is a measured figure from a supplied price
+    #   "unpriced" - the arm was measured but no token price is configured
+    cost_status: str = "free"
     notes: list[str] = field(default_factory=list)
     correct: list[bool] = field(default_factory=list, repr=False)
 
@@ -224,6 +234,7 @@ class SystemResult:
             "p50_ms": self.p50_ms,
             "p95_ms": self.p95_ms,
             "cost_per_1k_usd": self.cost_per_1k_usd,
+            "cost_status": self.cost_status,
             "notes": self.notes,
         }
 
@@ -236,6 +247,7 @@ def evaluate_system(
     p50_ms: float | None = None,
     p95_ms: float | None = None,
     cost_per_1k_usd: float | None = None,
+    cost_status: str = "free",
     notes: Sequence[str] = (),
     n_resamples: int = DEFAULT_RESAMPLES,
     seed: int = DEFAULT_SEED,
@@ -252,6 +264,7 @@ def evaluate_system(
         p50_ms=p50_ms,
         p95_ms=p95_ms,
         cost_per_1k_usd=cost_per_1k_usd,
+        cost_status=cost_status,
         notes=list(notes),
         correct=correct,
     )

@@ -66,8 +66,9 @@ def load_env_file(path: str | Path = ".env") -> bool:
     """Read LLM_* settings from a .env file into os.environ.
 
     Deliberately not a dependency: python-dotenv would be another pin to
-    justify, and this is six lines. Existing environment variables win, so a
-    shell export overrides the file, which is what an operator expects when
+    justify, and this is a dozen lines of straight-line parsing. Existing
+    environment variables win, so a shell export overrides the file, which is
+    what an operator expects when
     debugging a bad key.
     """
     env_path = Path(path)

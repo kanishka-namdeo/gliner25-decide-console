@@ -314,6 +314,9 @@ async def run_panel(
                     p50_ms=p50,
                     p95_ms=p95,
                     cost_per_1k_usd=(cost / len(texts) * 1000) if (cost and priced) else None,
+                    # Distinguish "we measured a cost" from "nobody set a token
+                    # price". The UI must not show $0.00 for the second case.
+                    cost_status="priced" if priced else "unpriced",
                     notes=[
                         "zero-shot, label list only (no descriptions)",
                         f"measured over {len(preds) - invalid}/{len(preds)} replies",

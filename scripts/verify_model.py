@@ -1,8 +1,8 @@
 """Model gate: load GLiNER2.5-Decide on the verified environment and confirm it
 behaves as the model card documents.
 
-Split from verify_env.py on purpose — this downloads ~1.4 GB, so we only reach
-it once the cheap environment checks have passed.
+Split from verify_env.py on purpose - this loads the ~1.9 GB checkpoint, so we
+only reach it once the cheap environment checks have passed.
 
 Hard failures  : shape / finiteness / device problems. The app cannot work.
 Soft observations: agreement with the model card's documented examples. The card

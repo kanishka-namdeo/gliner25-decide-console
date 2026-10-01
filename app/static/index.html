@@ -7,10 +7,40 @@
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --line:#21262d; --text:#e6edf3; --dim:#8b949e;
-    --accent:#2f81f7; --good:#3fb950; --warn:#d29922; --bad:#f85149;
+    /* Two accents, not one, and the reason is measured. #2f81f7 is the right
+       blue for a *mark* on this background (4.62:1 against --panel) but white
+       text on top of it is only 3.75:1, which fails AA for a button label.
+       --accent stays for marks and focus rings; --accent-solid is the fill
+       under white text. Folding them into one token is how the button label
+       ended up unreadable. */
+    --accent:#2f81f7; --accent-solid:#1f6feb;
+    --good:#3fb950; --warn:#d29922; --bad:#f85149;
+    /* Chart rules. --line on --panel is 1.14:1, which is not a scale, it is a
+       rumour: gridlines drawn in it are invisible and the reader loses the
+       only reference the axis has. --grid is the lightest value that still
+       reads as a line rather than as data (1.7:1, deliberately below the
+       3:1 non-text floor so it never competes with a mark). */
+    --grid:#3a424c;
+    /* One motion token rather than a duration copied to every transition.
+       140ms reads as acknowledgement on a control; nothing here moves far
+       enough to want a spring. */
+    --dur:140ms;
+    --control-h:34px;
     --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box}
+  /* Motion is opt-out. The only motion here is a colour fade on a control, but
+     the query costs one line and it is the difference between a console that
+     respects its reader and one that does not. */
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{transition:none!important;animation:none!important}
+  }
+  /* Keyboard focus needs a ring on every interactive control, and the ring has
+     to survive the dark surfaces: the UA default is a 1px dotted outline that
+     is nearly invisible against --panel. :focus-visible keeps it off pointer
+     clicks, where a ring is noise. Never set outline:none without this. */
+  :is(button,input,select,textarea,a,[tabindex]):focus-visible{
+    outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
   body{margin:0;background:var(--bg);color:var(--text);
        font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
   header{border-bottom:1px solid var(--line);padding:14px 22px;display:flex;
@@ -18,52 +48,141 @@
   h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.2px}
   .sub{color:var(--dim);font-size:12px}
   .spacer{flex:1}
-  .badge{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:99px;
-         background:#1f2937;border:1px solid var(--line);font-size:11.5px;color:var(--dim)}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;
+         background:#1f2937;border:1px solid var(--line);font-size:12px;color:var(--dim)}
   .badge.on{color:var(--good);border-color:#1f6f34}
   .badge.off{color:var(--warn);border-color:#5c4a12}
-  nav{display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+  nav{border-bottom:1px solid var(--line);background:var(--panel)}
+  nav .tabs{display:flex;gap:2px;padding:0 22px;overflow-x:auto}
   nav button{background:none;border:none;border-bottom:2px solid transparent;color:var(--dim);
-             padding:11px 15px;cursor:pointer;font-size:13.5px;font-family:inherit}
+             padding:12px 15px;cursor:pointer;font-size:13.5px;font-family:inherit;
+             white-space:nowrap;transition:color var(--dur) ease,border-color var(--dur) ease}
   nav button:hover{color:var(--text)}
   nav button[aria-selected=true]{color:var(--text);border-bottom-color:var(--accent)}
-  main{padding:22px;max-width:1180px}
+  main{padding:22px;max-width:1180px;margin:0 auto}
   section[hidden]{display:none}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px}
+  /* The panel table is wide. Let it scroll inside its card rather than push
+     the page sideways on a narrow window. tabindex + role make the scroller
+     reachable by keyboard, which it otherwise is not: a div with overflow is
+     invisible to Tab, so a keyboard user cannot pan the table at all. */
+  .scroll{overflow-x:auto}
+  .scroll:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .card h2{font-size:13px;margin:0 0 4px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim)}
   .card p.hint{margin:0 0 12px;color:var(--dim);font-size:12.5px}
+  /* One control height. A <select> renders 34.4px and a text input 32.8px on
+     this platform, and the row bottom-aligns, so a mixed row leaves the select
+     sitting a couple of pixels proud of its neighbours. --control-h makes the
+     difference explicit instead of leaving it to the UA. */
   textarea,input,select{background:#0d1117;border:1px solid var(--line);color:var(--text);
-        border-radius:6px;padding:8px 10px;font:13px var(--mono);width:100%}
+        border-radius:6px;padding:8px 10px;font:13px var(--mono);width:100%;
+        transition:border-color var(--dur) ease,box-shadow var(--dur) ease}
+  /* Exact height, not min-height. A <select> carries its own intrinsic height
+     and a text input another, so min-height left them a pixel apart and the
+     bottom-aligned row showed a 1px stagger. border-box makes this the outer
+     height, so padding and border stay inside it. */
+  input,select{height:var(--control-h)}
+  /* Hover is a hint that a control is interactive; the border change is the
+     cheapest one that does not reflow the layout. */
+  textarea:hover,input:hover,select:hover{border-color:#3a424c}
+  /* An invalid field is marked at the field, not only in a summary at the
+     bottom of the page. aria-invalid carries the same state to assistive
+     tech, since a border colour alone is not perceivable. */
+  [aria-invalid=true]{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+  /* Number inputs get a spinner that eats into a 130px column; the field is
+     still an input type number for stepper and keypad behaviour, so hide the
+     affordance rather than the function. */
+  input[type=number]{-moz-appearance:textfield}
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   textarea{min-height:96px;resize:vertical;font-family:inherit;font-size:13.5px;line-height:1.5}
-  button.run{background:var(--accent);border:none;color:#fff;padding:9px 18px;border-radius:6px;
-        cursor:pointer;font:600 13px inherit}
+  button.run{background:var(--accent-solid);border:none;color:#fff;padding:9px 18px;border-radius:6px;
+        cursor:pointer;font:600 13px inherit;height:var(--control-h);
+        transition:filter var(--dur) ease}
+  button.run:hover:not(:disabled){filter:brightness(1.12)}
   button.run:disabled{opacity:.5;cursor:not-allowed}
   button.ghost{background:transparent;border:1px solid var(--line);color:var(--text);
-        padding:5px 11px;border-radius:6px;cursor:pointer;font:12px inherit}
+        padding:5px 11px;border-radius:6px;cursor:pointer;font:12px inherit;
+        transition:border-color var(--dur) ease,background var(--dur) ease}
+  button.ghost:hover{border-color:#3a424c;background:#1c2128}
+  /* The row bottom-aligns, so every cell must be the same height or the inputs
+     stop sharing a baseline: one cell with a helper line under it used to push
+     its own input 30px above its neighbours. .field-aux is a reserved line
+     under every control — the helper text or the validation error lands in it,
+     and the row height never changes when one appears. */
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
   .row>*{flex:1;min-width:150px}
-  .row>.narrow{flex:0 0 130px}
+  .row>.narrow{flex:0 0 150px}
+  .field-aux{min-height:1.5em;margin:5px 0 0}
+  .field-aux .note{margin:0}
+  /* Right-align helper text under a narrow control so it reads as a caption
+     for the field above it rather than as a stray sentence drifting into the
+     next column's space. */
+  .row>.narrow .field-aux .note{text-align:right}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+  /* Chips size to their content and wrap as whole units. Without this they
+     shrink inside the flex row and break mid-word ("TF-IDF + LR" over three
+     lines), which made the system picker unreadable. */
   .chip{background:#1f2937;border:1px solid var(--line);border-radius:99px;padding:4px 10px;
-        font:12px var(--mono);display:flex;gap:7px;align-items:center}
-  .chip button{background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px;padding:0;line-height:1}
-  .chip button:hover{color:var(--bad)}
+        font:12px var(--mono);display:flex;gap:7px;align-items:center;
+        flex:0 0 auto;white-space:nowrap}
+  /* A system chip is a label, so the whole pill toggles, not just the 13px
+     box inside it. The pointer target was one checkbox; it is now the chip. */
+  .chip.pick{cursor:pointer;padding:6px 12px;transition:border-color var(--dur) ease,background var(--dur) ease}
+  .chip.pick:hover{border-color:#3a424c;background:#242c38}
+  .chip.pick input{margin:0;cursor:pointer;accent-color:var(--accent)}
+  .chip.pick:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+  /* 24x24 is the WCAG 2.2 AA floor for a pointer target. The glyph is a text
+     character, so the hit area has to be given rather than inherited. */
+  .chip button{background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px;
+        padding:0;line-height:1;min-width:24px;min-height:24px;border-radius:4px;
+        transition:color var(--dur) ease,background var(--dur) ease}
+  .chip button:hover{color:var(--bad);background:#3d1418}
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th{text-align:left;color:var(--dim);font-weight:500;font-size:11.5px;text-transform:uppercase;
+  /* Column headers are 12px, not 11.5. Uppercase at this size loses legibility
+     and these are the labels a screen-magnified reader is scanning for. */
+  th{text-align:left;color:var(--dim);font-weight:600;font-size:12px;text-transform:uppercase;
      letter-spacing:.5px;padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
   td{padding:8px 9px;border-bottom:1px solid var(--line);vertical-align:top}
   tr:last-child td{border-bottom:none}
   .num{font-family:var(--mono);text-align:right;white-space:nowrap}
-  .bar{height:6px;background:#21262d;border-radius:3px;overflow:hidden;margin-top:5px}
+  .bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}
   .bar>i{display:block;height:100%;background:var(--accent)}
   .good{color:var(--good)} .bad{color:var(--bad)} .warn{color:var(--warn)} .dim{color:var(--dim)}
-  .note{font-size:11.5px;color:var(--dim);margin-top:3px}
+  /* 12px floor. The caveat lines were 11.5px in the dimmest colour on the
+     page, and they are the load-bearing text: what a confidence number is
+     not, why a row is missing, what a run cost. The smallest, greyest text
+     was carrying the most meaning. */
+  .note{font-size:12px;color:var(--dim);margin-top:3px;line-height:1.5}
   .msg{padding:11px 13px;border-radius:6px;margin:12px 0;font-size:13px}
   .msg.err{background:#3d1418;border:1px solid #6e2a30;color:#ffb4ab}
   .msg.info{background:#12263f;border:1px solid #1f4b7a}
+  /* A non-significant comparison is the honest result and was rendering with
+     no background at all, which read as absence rather than as a verdict. */
+  .msg.neutral{background:#12171e;border:1px solid var(--line);color:var(--dim)}
+  .msg.neutral b{color:var(--text)}
+  /* The slow-arm warning. Warn amber, not error red: nothing has failed, the
+     operator is being told what a choice will cost. */
+  .msg.warnmsg{background:#2a2110;border:1px solid #5c4a12;color:#e3b341}
+  /* The schema-swap explanation is the argument the tab exists to make. It was
+     a .note — 11.5px grey, the same weight as a stray footnote — for the one
+     sentence that carries the finding. */
+  .explain{color:var(--text);font-size:13.5px;line-height:1.6;margin:12px 0;max-width:70ch}
+  /* Field-scoped validation text, wired to its input with aria-describedby. */
+  .field-err{color:#ffb4ab;font-size:12px;margin:5px 0 0;min-height:0}
+  .field-err[hidden]{display:none}
   .kv{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:var(--dim)}
   .kv b{color:var(--text);font-weight:500}
   code{background:#0d1117;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font:12px var(--mono)}
+  /* Long blocking requests need their state announced, not just drawn: this is
+     a polite live region so it does not interrupt, and it is separate from the
+     results so a screen reader is not made to re-read the whole table. */
+  .status{font-size:12.5px;color:var(--dim);margin:10px 0;min-height:1.5em}
+  .status:empty{display:none}
+  /* A chart that shrinks to fit a phone loses its 11px labels. Give it a floor
+     and let it scroll, so the plot is either legible or scrollable, never
+     silently illegible. */
+  .chart{min-width:560px}
 </style>
 </head>
 <body>
@@ -77,54 +196,81 @@
   <span id="bLlm" class="badge">llm: …</span>
 </header>
 
-<nav>
-  <button data-tab="route" aria-selected="true">Router</button>
-  <button data-tab="panel" aria-selected="false">Evidence panel</button>
-  <button data-tab="swap" aria-selected="false">Schema swap</button>
+<!-- The tablist lives in an inner div, not on the <nav> itself. role="tablist"
+     overrode the navigation landmark, so the console had no <nav> at all once
+     the ARIA roles were declared. The landmark and the widget are different
+     jobs. -->
+<nav aria-label="Product surfaces">
+  <div class="tabs" role="tablist">
+  <button role="tab" id="tabbtn-route" data-tab="route" aria-controls="tab-route" aria-selected="true">Router</button>
+  <button role="tab" id="tabbtn-panel" data-tab="panel" aria-controls="tab-panel" aria-selected="false" tabindex="-1">Evidence panel</button>
+  <button role="tab" id="tabbtn-swap" data-tab="swap" aria-controls="tab-swap" aria-selected="false" tabindex="-1">Schema swap</button>
+  </div>
 </nav>
 
 <main>
   <!-- ============ ROUTER ============ -->
-  <section id="tab-route">
+  <section id="tab-route" role="tabpanel" aria-labelledby="tabbtn-route">
     <div class="card">
       <h2>Classify with your own schema</h2>
       <p class="hint">The label set is an input, not part of the weights. Edit it and re-run — no retraining.
          Several heads are scored in one forward pass.</p>
-      <textarea id="rText" placeholder="Paste a customer message…">My card was charged twice this month and I want the second payment reversed.</textarea>
+      <label class="sub" for="rText">text to classify</label>
+      <textarea id="rText" placeholder="Paste a customer message…" aria-describedby="rTextErr">My card was charged twice this month and I want the second payment reversed.</textarea>
+      <p class="field-err" id="rTextErr" role="alert" hidden></p>
       <div class="row" style="margin-top:12px">
-        <div style="flex:2"><input id="rLabels" value="refund_request,card_lost,order_status,login_problem,speak_to_human"></div>
-        <div class="narrow"><label class="sub">head name</label><input id="rHead" value="intent"></div>
-        <div class="narrow"><label class="sub">multi-label</label>
-          <select id="rMulti"><option value="no">no</option><option value="yes">yes</option></select></div>
+        <div style="flex:2"><label class="sub" for="rLabels">label set (comma separated)</label><input id="rLabels" value="refund_request,card_lost,order_status,login_problem,speak_to_human" aria-describedby="rLabelsErr"><div class="field-aux"><p class="field-err" id="rLabelsErr" role="alert" hidden></p></div></div>
+        <div class="narrow"><label class="sub" for="rHead">head name</label><input id="rHead" value="intent"><div class="field-aux"></div></div>
+        <div class="narrow"><label class="sub" for="rMulti">multi-label</label>
+          <select id="rMulti"><option value="no">no</option><option value="yes">yes</option></select><div class="field-aux"></div></div>
       </div>
-      <div class="chips" id="rChips"></div>
+      <div class="chips" id="rChips" aria-label="current label set"></div>
       <button class="run" id="rRun">Classify</button>
     </div>
     <div class="card" id="rOut" hidden>
       <h2>Result</h2>
+      <p class="status" id="rStatus" role="status" aria-live="polite"></p>
       <div id="rResult"></div>
     </div>
   </section>
 
   <!-- ============ PANEL ============ -->
-  <section id="tab-panel" hidden>
+  <section id="tab-panel" role="tabpanel" aria-labelledby="tabbtn-panel" hidden>
     <div class="card">
       <h2>Evidence panel</h2>
       <p class="hint">Every system scores the identical items in the identical order, so the pairwise
          significance tests are valid. Metric is exact-set match.</p>
       <div class="row">
-        <div><label class="sub">fixture</label><select id="pFixture"></select></div>
-        <div class="narrow"><label class="sub">items</label><input id="pLimit" value="300"></div>
-        <div class="narrow"><label class="sub">batch</label><input id="pBatch" value="16"></div>
-        <div class="narrow"><label class="sub">&nbsp;</label><button class="run" id="pRun">Run panel</button></div>
+        <div><label class="sub" for="pFixture">fixture</label><select id="pFixture"></select><div class="field-aux"></div></div>
+        <div class="narrow"><label class="sub" for="pLimit">items</label><input id="pLimit" type="number" min="1" step="1" value="300" aria-describedby="pLimitErr"><div class="field-aux"><p class="field-err" id="pLimitErr" role="alert" hidden></p></div></div>
+        <div class="narrow"><label class="sub" for="pBatch">batch</label><input id="pBatch" type="number" min="1" step="1" value="16" aria-describedby="pBatchErr pBatchHint"><div class="field-aux"><p class="note" id="pBatchHint">per forward pass</p><p class="field-err" id="pBatchErr" role="alert" hidden></p></div></div>
+        <!-- No <label for> here. The button's own text is its accessible name;
+             a label pointing at a button is not valid labelling, and the old
+             <label for="pRun">&nbsp;</label> was a non-breaking space
+             masquerading as a caption for screen readers. -->
+        <div class="narrow"><button class="run" id="pRun">Run panel</button><div class="field-aux"></div></div>
       </div>
-      <div class="chips" id="pSystems" style="margin-top:14px"></div>
+      <div class="msg warnmsg" id="pLlmWarn" role="status" hidden></div>
+      <div class="chips" id="pSystems" style="margin-top:14px" role="group" aria-label="systems to score"></div>
+      <!-- Permanent. A run must never overwrite this: it is the caveat that
+           makes the panel's numbers mean anything. -->
       <div class="msg info" id="pNote">Independent benchmark data. The model's own training distribution is
         never mixed into these numbers.</div>
+      <div class="note" id="pFixtureNote" style="margin-top:8px"></div>
     </div>
     <div class="card" id="pOut" hidden>
-      <h2>Systems</h2>
+      <h2>Accuracy against its interval</h2>
+      <p class="hint">Overlapping intervals mean the difference is not established at this sample size.
+         Read the table below for the exact figures.</p>
+      <div id="pForest"></div>
+      <h2 style="margin-top:22px">Systems</h2>
+      <!-- aria-live lives on the status line, not on the table. A live region
+           wrapping a whole table makes a screen reader re-announce every cell
+           on each run; announcing "panel run complete, 6 systems scored" and
+           leaving the reader to navigate the table is the useful version. -->
+      <p class="status" id="pStatus" role="status" aria-live="polite"></p>
       <div id="pResults"></div>
+      <div id="pRunNotes" class="note" style="margin-top:10px" hidden></div>
       <h2 style="margin-top:22px">Head to head</h2>
       <div id="pCompare"></div>
       <div id="pUnavailable"></div>
@@ -132,20 +278,21 @@
   </section>
 
   <!-- ============ SWAP ============ -->
-  <section id="tab-swap" hidden>
+  <section id="tab-swap" role="tabpanel" aria-labelledby="tabbtn-swap" hidden>
     <div class="card">
       <h2>Disjoint-taxonomy test</h2>
       <p class="hint">Split the intents into two non-overlapping halves. A fine-tuned classifier is locked
          to the taxonomy it trained on and cannot emit the other half's labels at all.
          GLiNER2.5-Decide receives the label set at call time and just answers.</p>
       <div class="row">
-        <div><label class="sub">fixture</label><select id="sFixture"></select></div>
-        <div class="narrow"><label class="sub">items</label><input id="sLimit" value="300"></div>
-        <div class="narrow"><label class="sub">&nbsp;</label><button class="run" id="sRun">Run test</button></div>
+        <div><label class="sub" for="sFixture">fixture</label><select id="sFixture"></select><div class="field-aux"></div></div>
+        <div class="narrow"><label class="sub" for="sLimit">items</label><input id="sLimit" type="number" min="1" step="1" value="300" aria-describedby="sLimitErr"><div class="field-aux"><p class="field-err" id="sLimitErr" role="alert" hidden></p></div></div>
+        <div class="narrow"><button class="run" id="sRun">Run test</button><div class="field-aux"></div></div>
       </div>
     </div>
     <div class="card" id="sOut" hidden>
       <h2>Outcome</h2>
+      <p class="status" id="sStatus" role="status" aria-live="polite"></p>
       <div id="sResults"></div>
     </div>
   </section>
@@ -158,6 +305,92 @@ const el = (t,c,x) => { const n=document.createElement(t); if(c)n.className=c;
 const pct = v => (v*100).toFixed(1)+'%';
 const ci = (lo,hi) => `[${pct(lo)}, ${pct(hi)}]`;
 
+/* A wide table inside a card scrolls rather than pushing the page sideways.
+   The wrapper is focusable and named: an overflowing div is skipped by Tab, so
+   without this a keyboard user has no way to pan it at all. */
+function scrollWrap(node, label){
+  const sc = el('div','scroll');
+  sc.tabIndex = 0;
+  sc.setAttribute('role','region');
+  sc.setAttribute('aria-label', label + ', scrolls horizontally');
+  sc.appendChild(node);
+  return sc;
+}
+
+/* FastAPI returns `detail` as a string for HTTPException but as an array of
+   error objects for a 422. Rendering the array through textContent yields
+   "[object Object]", so normalise both shapes into readable lines. */
+function errText(detail){
+  if(detail==null) return 'request failed';
+  if(typeof detail === 'string') return detail;
+  if(Array.isArray(detail)){
+    return detail.map(e=>{
+      const loc = Array.isArray(e.loc) ? e.loc.filter(p=>p!=='body').join('.') : '';
+      return (loc? loc+': ' : '') + (e.msg||e.type||'invalid request');
+    }).join('; ');
+  }
+  return String(detail);
+}
+
+/* Dot-and-whisker plot of accuracy against its bootstrap interval.
+   The interval is the point: two point estimates can be 4 points apart and
+   still be indistinguishable, and overlapping whiskers show that at a glance
+   where a table of bracketed numbers does not. ~40 lines of SVG beats pulling
+   in a charting library for one mark type, and keeps the offline one-file rule. */
+function forest(systems){
+  const rows = systems.filter(s=>s.ci_low!=null);
+  if(!rows.length) return el('div','note','no interval to plot for these rows');
+  const W=560, padL=210, padR=54, rowH=26, H=rows.length*rowH+48;
+  const x = v => padL + v*(W-padL-padR);
+  const NS='http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS,'svg');
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  svg.setAttribute('width','100%'); svg.setAttribute('height',H);
+  svg.setAttribute('role','img');
+  // The name carries the numbers too. A chart whose only accessible name is
+  // "accuracy with 95% confidence interval per system" tells a screen-reader
+  // user the chart exists and nothing about what is in it.
+  svg.setAttribute('aria-label','Accuracy with 95% confidence interval per system. '+
+    rows.map(s=>`${s.name}: ${pct(s.accuracy)}, interval ${ci(s.ci_low,s.ci_high)}`).join('. '));
+  const add=(tag,attrs)=>{ const n=document.createElementNS(NS,tag);
+    for(const k in attrs) n.setAttribute(k,attrs[k]); svg.appendChild(n); return n; };
+
+  /* Colours come from the :root tokens, resolved once. Hardcoding a hex here
+     duplicated the palette and drifted: the gridline was still drawn in a
+     literal after --grid was introduced, so changing the token changed nothing
+     and the contrast check on the token stopped describing the chart. */
+  const css = getComputedStyle(document.documentElement);
+  const token = n => css.getPropertyValue(n).trim();
+  const C = { grid: token('--grid'), dim: token('--dim'), text: token('--text'),
+              accent: token('--accent') };
+  // Gridlines at deciles, so the reader has a scale without a charting library.
+  for(let v=0; v<=1.001; v+=0.1){
+    add('line',{x1:x(v),x2:x(v),y1:16,y2:H-30,stroke:C.grid,'stroke-width':1});
+    const t=add('text',{x:x(v),y:H-14,fill:C.dim,'font-size':10,'text-anchor':'middle'});
+    t.textContent=(v*100).toFixed(0)+'%';
+  }
+  // Name the axis. A row of percentages is not self-describing.
+  const ax=add('text',{x:padL-10,y:11,fill:C.dim,'font-size':10,'text-anchor':'start'});
+  ax.textContent='accuracy (95% bootstrap interval)';
+
+  rows.forEach((s,i)=>{
+    const y = 16 + i*rowH + rowH/2;
+    const floor = s.name.startsWith('majority class');
+    const colour = floor ? C.dim : C.accent;
+    const t=add('text',{x:padL-10,y:y+3,fill:floor?C.dim:C.text,'font-size':11,
+                         'text-anchor':'end'});
+    // Trim the row label; the full name and its notes are in the table above.
+    t.textContent = s.name.length>30 ? s.name.slice(0,29)+'…' : s.name;
+    add('line',{x1:x(s.ci_low),x2:x(s.ci_high),y1:y,y2:y,stroke:colour,'stroke-width':2});
+    // The dot is the estimate; the whisker is the interval. Without end caps
+    // the whisker reads as a line through the dot rather than as a range.
+    add('line',{x1:x(s.ci_low),x2:x(s.ci_low),y1:y-4,y2:y+4,stroke:colour,'stroke-width':2});
+    add('line',{x1:x(s.ci_high),x2:x(s.ci_high),y1:y-4,y2:y+4,stroke:colour,'stroke-width':2});
+    add('circle',{cx:x(s.accuracy),cy:y,r:4,fill:colour});
+  });
+  return svg;
+}
+
 const SYSTEMS = [
   ['gliner','GLiNER2.5-Decide'],
   ['gliner_described','+ label descriptions'],
@@ -169,13 +402,48 @@ const SYSTEMS = [
 // Measured against a real endpoint at ~6-7 s per call, so cap the item count
 // when the LLM arm is selected. Above this the row alone exceeds ten minutes.
 const LLM_SLOW_AFTER = 120;
+// Seconds per item, measured: 12 items took 37 s at the default concurrency
+// of 4. The estimate the console used to show was n*3 labelled "minutes",
+// which overstated a 6-minute run as 360 — a 60x error that made the ceiling
+// look arbitrary and the warning look like noise. Convert properly.
+const LLM_SECONDS_PER_ITEM = 37/12;
+const llmEstimate = n => n * LLM_SECONDS_PER_ITEM / 60;
 const selected = new Set(['gliner','tfidf']);
 
 /* ---------- tabs ---------- */
-document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('nav button').forEach(x => x.setAttribute('aria-selected', x===b));
-  document.querySelectorAll('main section').forEach(s => s.hidden = s.id !== 'tab-'+b.dataset.tab);
+const tabButtons = [...document.querySelectorAll('nav button[data-tab]')];
+const TABS = tabButtons.map(b => b.dataset.tab);
+function selectTab(btn, push){
+  tabButtons.forEach(x => {
+    const on = x === btn;
+    x.setAttribute('aria-selected', on);
+    // Roving tabindex: only the selected tab is in the tab order, which is
+    // what the ARIA tabs pattern requires once the roles are declared.
+    x.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll('main section').forEach(s => s.hidden = s.id !== 'tab-'+btn.dataset.tab);
+  // The tab lives in the URL. A console whose three surfaces are unreachable
+  // by link cannot be pointed at, and Back did nothing because nothing was
+  // ever pushed. pushState on click only, never replace, so history keeps a
+  // real entry per navigation.
+  if(push && location.hash.slice(1) !== btn.dataset.tab)
+    history.pushState({tab:btn.dataset.tab}, '', '#'+btn.dataset.tab);
+}
+function tabByName(name){ return tabButtons.find(b => b.dataset.tab === name) || tabButtons[0]; }
+tabButtons.forEach(b => b.onclick = () => selectTab(b, true));
+// Arrow keys act on the selected tab, so the keydown listener stays on the
+// container rather than being rebound on every selection.
+document.querySelector('nav').addEventListener('keydown', e => {
+  const i = tabButtons.findIndex(b => b.getAttribute('aria-selected') === 'true');
+  let next = null;
+  if(e.key === 'ArrowRight') next = tabButtons[(i+1) % tabButtons.length];
+  if(e.key === 'ArrowLeft')  next = tabButtons[(i-1+tabButtons.length) % tabButtons.length];
+  if(e.key === 'Home')       next = tabButtons[0];
+  if(e.key === 'End')        next = tabButtons[tabButtons.length-1];
+  if(next){ e.preventDefault(); selectTab(next, true); next.focus(); }
 });
+// Back/forward and a pasted #panel both have to land on the right surface.
+window.addEventListener('popstate', () => selectTab(tabByName(location.hash.slice(1)), false));
 
 /* ---------- bootstrap ---------- */
 let FIXTURES = [];
@@ -193,7 +461,51 @@ async function boot(){
       const sel = $('#'+id); sel.innerHTML='';
       FIXTURES.forEach(f => sel.appendChild(new Option(`${f.name} — ${f.n_labels} labels`, f.name)));
     });
-  }catch(e){ $('#bDevice').textContent = 'backend unreachable: '+e; }
+  }catch(e){
+    // An unreachable backend is a state the operator has to see, not a failed
+    // badge. Both badges said "…" until now, which reads as "still loading".
+    const b = $('#bDevice');
+    b.className = 'badge off';
+    b.textContent = 'backend unreachable';
+    $('#bLlm').className = 'badge off';
+    $('#bLlm').textContent = 'no llm status';
+    ['pFixture','sFixture'].forEach(id=>{
+      const sel = $('#'+id);
+      sel.innerHTML=''; sel.appendChild(new Option('backend unreachable','__none__'));
+      sel.disabled = true;
+    });
+  }
+}
+
+/* ---------- validation ---------- */
+/* Errors belong next to the field that caused them, wired by aria-describedby,
+   and focus moves to the first bad field. An error rendered only at the bottom
+   of the results card asks the reader to work out which of four inputs was
+   wrong. */
+function fieldError(inputId, errId, message){
+  const input = $('#'+inputId), err = $('#'+errId);
+  if(message){
+    input.setAttribute('aria-invalid','true');
+    err.textContent = message; err.hidden = false;
+    input.focus();
+  } else {
+    input.removeAttribute('aria-invalid');
+    err.textContent = ''; err.hidden = true;
+  }
+  return !message;
+}
+/* An empty numeric field yields NaN, and NaN serialises to null in JSON, so
+   the request reached the server as "limit: null" and came back as a 422 the
+   reader could not connect to a field. Validate before fetching. */
+function intField(inputId, errId, fallback){
+  const raw = $('#'+inputId).value.trim();
+  const n = Number(raw);
+  if(raw==='' || !Number.isFinite(n) || !Number.isInteger(n) || n < 1)
+    return fieldError(inputId, errId, 'enter a whole number of 1 or more'), null;
+  if(n > 100000)
+    return fieldError(inputId, errId, 'that is more items than any fixture holds; use 100000 or fewer'), null;
+  fieldError(inputId, errId, null);
+  return n;
 }
 
 /* ---------- router ---------- */
@@ -202,6 +514,10 @@ function chips(){
   $('#rLabels').value.split(',').map(s=>s.trim()).filter(Boolean).forEach(label=>{
     const c = el('div','chip'); c.appendChild(document.createTextNode(label));
     const x = el('button',null,'×');
+    // A bare "×" is announced as "multiplication sign", which tells a
+    // screen-reader user nothing about what the control does. Name it.
+    x.setAttribute('aria-label',`Remove label ${label}`);
+    x.title = `Remove ${label}`;
     x.onclick = ()=>{ $('#rLabels').value = $('#rLabels').value.split(',')
         .map(s=>s.trim()).filter(l=>l && l!==label).join(', '); chips(); };
     c.appendChild(x); box.appendChild(c);
@@ -213,26 +529,52 @@ $('#rRun').onclick = async ()=>{
   $('#rOut').hidden = false;
   try{
     const labels = $('#rLabels').value.split(',').map(s=>s.trim()).filter(Boolean);
+    // An empty label set is the one input error worth catching here: the
+    // backend has nothing to classify against and returns a schema error that
+    // reads as a server fault.
+    if(!labels.length){
+      fieldError('rLabels','rLabelsErr','enter at least one label — the schema is the input');
+      return;
+    }
+    if(!$('#rText').value.trim()){
+      fieldError('rText','rTextErr','there is no text to classify');
+      return;
+    }
+    fieldError('rLabels','rLabelsErr',null);
+    const out = $('#rResult'); out.innerHTML='';
+    out.appendChild(el('div','status','classifying…'));
     const res = await (await fetch('/api/route',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({text:$('#rText').value, heads:[{name:$('#rHead').value||'intent',labels,
         multi_label:$('#rMulti').value==='yes'}]})})).json();
-    const out = $('#rResult'); out.innerHTML='';
-    if(res.detail){ out.appendChild(el('div','msg err', res.detail)); return; }
+    out.innerHTML='';
+    if(res.detail){ out.appendChild(el('div','msg err', errText(res.detail))); return; }
+    let n = 0;
     for(const [head,val] of Object.entries(res.result)){
       const row = el('div'); row.style.margin='10px 0';
-      row.appendChild(el('div','sub', head));
-      const items = Array.isArray(val)? val : [val];
-      items.forEach(it=>{
-        const label = typeof it==='object' ? it.label : it;
-        const conf  = typeof it==='object' ? it.confidence : null;
+      const h = el('div','sub', head); h.style.fontWeight='600'; row.appendChild(h);
+      // Shape is fixed by the backend: {labels: [...], confidence: number|null}.
+      const labels = val.labels || [], conf = val.confidence;
+      if(!labels.length) row.appendChild(el('div','dim','(no label above threshold)'));
+      labels.forEach(label=>{
         const line = el('div'); line.style.cssText='display:flex;justify-content:space-between;gap:12px';
         line.appendChild(el('code',null,label));
-        line.appendChild(el('span', conf!=null?'good':'dim', conf!=null?pct(conf):'—'));
+        // Default text colour, not green. Green here is a verdict on a number
+        // the caveat directly below says is not a calibrated probability.
+        line.appendChild(el('span', conf!=null?null:'dim', conf!=null?pct(conf):'—'));
         row.appendChild(line);
-        if(conf!=null){ const bar=el('div','bar'); const i=el('i'); i.style.width=pct(conf); bar.appendChild(i); row.appendChild(bar); }
       });
-      out.appendChild(row);
+      if(conf!=null){
+        const bar=el('div','bar'); const i=el('i'); i.style.width=pct(conf); bar.appendChild(i); row.appendChild(bar);
+        // A multi-label head reports the *lowest* confidence of the labels it
+        // emitted (engine._parse). Saying so stops a reader treating it as the
+        // score for any single label.
+        row.appendChild(el('div','note', labels.length>1
+          ? 'lowest confidence across the labels above; not a calibrated probability'
+          : 'library confidence, not a calibrated probability'));
+      }
+      out.appendChild(row); n++;
     }
+    $('#rStatus').textContent = `classified; ${n} head${n===1?'':'s'}`;
   }catch(e){ $('#rResult').innerHTML=''; $('#rResult').appendChild(el('div','msg err', String(e))); }
   finally{ btn.disabled=false; btn.textContent='Classify'; }
 };
@@ -240,25 +582,81 @@ $('#rRun').onclick = async ()=>{
 /* ---------- panel ---------- */
 const sysBox = $('#pSystems');
 SYSTEMS.forEach(([key,label])=>{
-  const c = el('div','chip');
-  const i = document.createElement('input'); i.type='checkbox'; i.checked = selected.has(key);
-  i.onchange = ()=>{ i.checked ? selected.add(key) : selected.delete(key); };
+  // A <label> wrapper, not a div: the whole pill is then the pointer target and
+  // the checkbox keeps its own accessible name, instead of the only clickable
+  // thing being a 13px box with no label text in the tab order.
+  const c = el('label','chip pick');
+  const i = document.createElement('input');
+  i.type='checkbox'; i.checked = selected.has(key);
+  i.onchange = ()=>{ i.checked ? selected.add(key) : selected.delete(key);
+                     syncLlmWarning(); };
   c.appendChild(i); c.appendChild(document.createTextNode(' '+label));
   sysBox.appendChild(c);
 });
 
+/* Inline warning for the slow LLM arm. This used to be a window.confirm():
+   a blocking modal that froze the page, was not styled with the rest of the
+   console, could not be reached by keyboard predictably, and read the same on
+   every platform. The warning belongs next to the field it is about, and it
+   should appear before the operator presses Run, not after.
+
+   llmArmedFor holds the item count the operator has explicitly accepted. It is
+   keyed to the count rather than a boolean so that changing the field
+   un-arms the run: consent to a 300-item run is not consent to a 5000-item
+   run, and a stale "yes" must not carry over. */
+let llmArmedFor = null;
+function syncLlmWarning(){
+  const box = $('#pLlmWarn');
+  const n = Number($('#pLimit').value);
+  const over = selected.has('llm') && Number.isFinite(n) && n > LLM_SLOW_AFTER;
+  if(!over){ box.hidden = true; llmArmedFor = null; return; }
+  box.innerHTML='';
+  box.appendChild(el('div', null,
+    `The LLM arm costs seconds per item: ${n} items is about ` +
+    `${llmEstimate(n).toFixed(1)} minutes at the default concurrency of 4, and the ` +
+    `request blocks until it finishes. Above ${LLM_SLOW_AFTER} items the run tends to ` +
+    `time out rather than return a number.`));
+  // Offer the fix and the deliberate override, rather than describing the
+  // problem and leaving the only path to be a second press of Run.
+  const actions = el('div'); actions.style.marginTop='8px';
+  const fix = el('button','ghost','Use '+LLM_SLOW_AFTER+' items');
+  fix.onclick = ()=>{ $('#pLimit').value = LLM_SLOW_AFTER; syncLlmWarning(); };
+  const go = el('button','ghost','Run '+n+' anyway');
+  go.onclick = ()=>{ llmArmedFor = n; syncLlmWarning(); $('#pRun').focus(); };
+  actions.appendChild(fix); actions.appendChild(go);
+  box.appendChild(actions);
+  // Already accepted: keep the estimate visible, drop the prompt to decide.
+  if(llmArmedFor === n){ box.appendChild(el('div','note','proceeding as asked.')); return; }
+  box.hidden = false;
+}
+$('#pLimit').addEventListener('input', syncLlmWarning);
+
 $('#pRun').onclick = async ()=>{
-  const btn = $('#pRun'); btn.disabled=true; btn.textContent='Scoring…'; $('#pOut').hidden=false;
+  const btn = $('#pRun');
   const wantLLM = selected.has('llm');
-  const n = +$('#pLimit').value;
-  if (wantLLM && n > LLM_SLOW_AFTER) {
-    const ok = confirm(
-      `The LLM arm takes seconds per item.\n\n` +
-      `${n} items will take roughly ${Math.round(n * 3)} minutes at the current ` +
-      `concurrency, and the request may time out.\n\nRun ${LLM_SLOW_AFTER} items instead?`);
-    if (!ok) { btn.disabled=false; btn.textContent='Run panel'; return; }
-    $('#pLimit').value = LLM_SLOW_AFTER;
+  // Validate before anything else: an empty item count used to serialise to
+  // null and come back as a 422 rendered in the results card, far from the
+  // input that caused it.
+  const n = intField('pLimit','pLimitErr');
+  if(n===null) return;
+  const batch = intField('pBatch','pBatchErr');
+  if(batch===null) return;
+  if(!selected.size){
+    fieldError('pLimit','pLimitErr',null);
+    $('#pStatus').textContent='';
+    const box=$('#pResults'); box.innerHTML='';
+    box.appendChild(el('div','msg err','select at least one system to score.'));
+    return;
   }
+  // Over the measured ceiling with the LLM arm selected: surface the warning
+  // and wait for the deliberate in-page override rather than firing a run
+  // that is likely to time out.
+  if(wantLLM && n > LLM_SLOW_AFTER && llmArmedFor !== n){ syncLlmWarning(); return; }
+  llmArmedFor = null; syncLlmWarning();
+  btn.disabled=true; btn.textContent='Scoring…'; $('#pOut').hidden=false;
+  $('#pStatus').textContent = wantLLM
+    ? `running; the LLM arm is the slow part and reports progress in the server log…`
+    : 'running; a fine-tuned baseline may take a minute on first use…';
   $('#pResults').innerHTML = wantLLM
     ? '<div class="note">running; the LLM arm is the slow part and reports progress in the server log…</div>'
     : '<div class="note">running; a fine-tuned baseline may take a minute on first use…</div>';
@@ -267,14 +665,35 @@ $('#pRun').onclick = async ()=>{
     const d = await (await fetch('/api/panel',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({fixture:$('#pFixture').value, limit:+$('#pLimit').value,
         systems:[...selected], batch_size:+$('#pBatch').value})})).json();
-    if(d.detail){ $('#pResults').innerHTML=''; $('#pResults').appendChild(el('div','msg err',d.detail)); return; }
+    if(d.detail){ $('#pResults').innerHTML=''; $('#pStatus').textContent='';
+      $('#pResults').appendChild(el('div','msg err',errText(d.detail))); return; }
 
-    $('#pNote').textContent =
-      `${d.fixture.name}: ${d.fixture.n_items} items, ${d.fixture.n_labels} labels — ${d.fixture.note||''}`;
+    // The independence note is permanent and must survive a run. Fixture
+    // detail goes in its own line beside it rather than overwriting it.
+    // NB: distinct id from the #pFixture <select> above it.
+    // Built as text nodes, not innerHTML: the fixture's own note is free text
+    // from a data file, and a template literal into innerHTML is a markup sink
+    // for a string nobody reviewed.
+    const fxNote = $('#pFixtureNote'); fxNote.innerHTML='';
+    fxNote.appendChild(document.createTextNode(
+      `${d.fixture.name}: ${d.fixture.n_items} items, ${d.fixture.n_labels} labels, ` +
+      `${pct(d.fixture.label_coverage||0)} with descriptions` +
+      (d.fixture.note ? ` — ${d.fixture.note}` : '')));
+
+    // Top-level notes carry run-level facts the table has nowhere to put, such
+    // as what the LLM arm actually cost per item.
+    const runNotes = (d.notes||[]).filter(Boolean);
+    $('#pRunNotes').innerHTML='';
+    if(runNotes.length){
+      runNotes.forEach(n=>$('#pRunNotes').appendChild(el('div','note',n)));
+      $('#pRunNotes').hidden = false;
+    } else { $('#pRunNotes').hidden = true; }
 
     const t = el('table');
-    t.innerHTML = `<thead><tr><th>system</th><th class="num">accuracy</th><th class="num">95% CI</th>
-      <th class="num">macro-F1</th><th class="num">p50</th><th class="num">$/1k</th><th></th></tr></thead>`;
+    t.innerHTML = `<thead><tr><th scope="col">system</th><th scope="col" class="num">accuracy</th>
+      <th scope="col" class="num">95% CI</th><th scope="col" class="num">macro-F1</th>
+      <th scope="col" class="num">p50</th><th scope="col" class="num">p95</th>
+      <th scope="col" class="num">cost / 1k</th></tr></thead>`;
     const tb = el('tbody');
     d.systems.forEach(s=>{
       const isFloor = s.name.startsWith('majority class');
@@ -287,52 +706,132 @@ $('#pRun').onclick = async ()=>{
       tr.appendChild(el('td','num dim', s.ci_low!=null?ci(s.ci_low,s.ci_high):'—'));
       tr.appendChild(el('td','num', s.macro_f1!=null?s.macro_f1.toFixed(3):'—'));
       tr.appendChild(el('td','num', s.p50_ms!=null?s.p50_ms.toFixed(0)+' ms':'—'));
-      tr.appendChild(el('td','num', s.cost_per_1k_usd?'$'+s.cost_per_1k_usd.toFixed(2):'$0.00'));
-      const acc = el('td','num');
-      acc.appendChild(el('span', s.accuracy>0.8?'good':s.accuracy>0.6?'warn':'bad',
-        s.accuracy>0.8?'strong':s.accuracy>0.6?'usable':'weak'));
-      tr.appendChild(acc);
+      tr.appendChild(el('td','num dim', s.p95_ms!=null?s.p95_ms.toFixed(0)+' ms':'—'));
+      // cost_status is decided by the backend. A null price is not $0.00: for a
+      // local arm it is genuinely free, for the LLM arm it means no token price
+      // was configured, and showing $0.00 there would understate its cost by an
+      // unknown amount.
+      tr.appendChild(el('td','num'+(s.cost_status==='unpriced'?' dim':''),
+        s.cost_status==='priced' ? '$'+s.cost_per_1k_usd.toFixed(2)
+        : s.cost_status==='unpriced' ? 'unpriced'
+        : 'free'));
       tb.appendChild(tr);
     });
-    t.appendChild(tb); $('#pResults').innerHTML=''; $('#pResults').appendChild(t);
+    t.appendChild(tb); $('#pResults').innerHTML='';
+    // tabindex + role: a div with overflow-x is not in the tab order, so a
+    // keyboard user cannot pan the table. The label says what scrolls.
+    const sc = el('div','scroll');
+    sc.tabIndex = 0; sc.setAttribute('role','region');
+    sc.setAttribute('aria-label','systems table, scrolls horizontally');
+    sc.appendChild(t); $('#pResults').appendChild(sc);
+    // The forest needs a scroll of its own, not just a shrink-to-fit. Scaling
+    // a 560-unit viewBox down to a 375px phone renders 11px labels at about
+    // 7px; the reader gets an unreadable chart rather than a scrollable one.
+    $('#pForest').innerHTML='';
+    if(d.systems.length>1){
+      const fw = el('div','scroll');
+      fw.tabIndex = 0; fw.setAttribute('role','region');
+      fw.setAttribute('aria-label','accuracy interval plot, scrolls horizontally');
+      const inner = el('div','chart'); inner.appendChild(forest(d.systems));
+      fw.appendChild(inner); $('#pForest').appendChild(fw);
+    } else {
+      // A heading above an empty div reads as a chart that failed to load.
+      $('#pForest').appendChild(el('div','note',
+        'select two or more systems to plot their intervals against each other.'));
+    }
 
-    if(d.comparisons.length){
+    // comparisons and unavailable are both optional in the payload. A missing
+    // key used to throw, and the catch wiped a table that had already rendered
+    // correctly — losing good data to a shape regression.
+    const comparisons = d.comparisons || [], unavailable = d.unavailable || [];
+    if(comparisons.length){
       const box = $('#pCompare'); box.innerHTML='';
-      d.comparisons.forEach(c=>{
+      comparisons.forEach(c=>{
         const sig = c.significant;
-        const box2 = el('div','msg '+(sig?'info':''));
-        box2.style.borderColor = sig ? '#1f4b7a' : 'var(--line)';
-        box2.innerHTML = `<b>${c.a}</b> vs <b>${c.b}</b><br>
-          difference <b>${(c.diff*100).toFixed(1)} pts</b> ${ci(c.ci_low,c.ci_high)} ·
-          p = ${c.p_value<0.001?'<0.001':c.p_value.toFixed(3)} ·
-          McNemar b/c = ${c.mcnemar.b}/${c.mcnemar.c} · ${sig?'significant':'not significant'}`;
+        // Text nodes, not innerHTML: a and b are system names from the payload.
+        // A neutral surface for "not significant" — it previously had no
+        // background at all, so the honest result looked like less information
+        // than the significant one rather than like a different answer.
+        const box2 = el('div','msg '+(sig?'info':'neutral'));
+        const head = el('div');
+        head.appendChild(el('b',null,c.a)); head.appendChild(document.createTextNode(' vs '));
+        head.appendChild(el('b',null,c.b));
+        box2.appendChild(head);
+        // Name the direction. "-21.7 pts" on its own needs the reader to work
+        // out which system it is relative to, and getting that backwards
+        // inverts the comparison the panel exists to make.
+        if(typeof c.diff === 'number')
+          box2.appendChild(el('div','note',
+            `${c.a} scored ${Math.abs(c.diff*100).toFixed(1)} points ` +
+            `${c.diff >= 0 ? 'higher' : 'lower'} than ${c.b} on the same items.`));
+        const line = el('div'); line.style.marginTop='4px';
+        line.appendChild(document.createTextNode('difference '));
+        line.appendChild(el('b',null,`${(c.diff*100).toFixed(1)} pts`));
+        line.appendChild(document.createTextNode(` ${ci(c.ci_low,c.ci_high)} · `));
+        line.appendChild(document.createTextNode(
+          `p = ${c.p_value<0.001?'<0.001':c.p_value.toFixed(3)} · `));
+        line.appendChild(document.createTextNode(
+          `McNemar b/c = ${c.mcnemar.b}/${c.mcnemar.c} · `));
+        line.appendChild(el('b',null,sig?'significant':'not significant'));
+        box2.appendChild(line);
         box.appendChild(box2);
       });
     } else { $('#pCompare').innerHTML='<div class="note">needs two systems scored on the same items.</div>'; }
 
-    if(d.unavailable.length){
-      const box = $('#pUnavailable'); box.innerHTML='<h2 style="margin-top:22px">Unavailable</h2>';
-      d.unavailable.forEach(u=>box.appendChild(el('div','msg err', u.system+' — '+u.reason)));
+    const ubox = $('#pUnavailable'); ubox.innerHTML='';
+    if(unavailable.length){
+      ubox.appendChild(el('h2',null,'Unavailable')).style.marginTop='22px';
+      // A system that could not run must read as "did not run, and here is
+      // why", never as a missing row.
+      unavailable.forEach(u=>ubox.appendChild(el('div','msg err', u.system+' — '+u.reason)));
     }
-    const k = $('#pResults').parentElement;
-  }catch(e){ $('#pResults').innerHTML=''; $('#pResults').appendChild(el('div','msg err',String(e))); }
+    $('#pStatus').textContent = `panel run complete; ${d.systems.length} system` +
+      `${d.systems.length===1?'':'s'} scored, ${comparisons.length} comparison` +
+      `${comparisons.length===1?'':'s'}` +
+      (unavailable.length ? `, ${unavailable.length} unavailable` : '') + '.';
+  }catch(e){
+    // Keep whatever already rendered. An exception here used to replace a
+    // correct table with a red box, destroying the run's actual results.
+    const status = $('#pStatus');
+    if(!$('#pResults').querySelector('table')){
+      $('#pResults').innerHTML='';
+      $('#pResults').appendChild(el('div','msg err',String(e)));
+      status.textContent = 'panel run failed.';
+    } else {
+      status.appendChild(document.createTextNode(' Partial render failed: '+String(e)));
+    }
+  }
   finally{ btn.disabled=false; btn.textContent='Run panel'; }
 };
 
 /* ---------- swap ---------- */
 $('#sRun').onclick = async ()=>{
-  const btn=$('#sRun'); btn.disabled=true; btn.textContent='Running…'; $('#sOut').hidden=false;
+  const btn=$('#sRun');
+  const n = intField('sLimit','sLimitErr');
+  if(n===null) return;
+  btn.disabled=true; btn.textContent='Running…'; $('#sOut').hidden=false;
+  $('#sStatus').textContent='running; fine-tuning a supervised classifier on App A only…';
   $('#sResults').innerHTML='<div class="note">fine-tuning a supervised classifier on App A only…</div>';
   try{
     const d = await (await fetch('/api/schema-swap',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({fixture:$('#sFixture').value, limit:+$('#sLimit').value})})).json();
+      body:JSON.stringify({fixture:$('#sFixture').value, limit:n})})).json();
     const out=$('#sResults'); out.innerHTML='';
-    if(d.detail){ out.appendChild(el('div','msg err',d.detail)); return; }
+    if(d.detail){ $('#sStatus').textContent='schema-swap test failed.';
+      out.appendChild(el('div','msg err', errText(d.detail))); return; }
     out.appendChild(el('div','note',
       `${d.fixture}: App A = ${d.app_a_labels} intents, App B = ${d.app_b_labels} intents, disjoint.`));
-    out.appendChild(el('p','note',d.explanation));
+    // The zero below is only meaningful next to the number of labelled
+    // examples the supervised arm was actually trained on.
+    if(d.supervised_trained_on!=null)
+      out.appendChild(el('div','note',
+        `Supervised arm trained on ${d.supervised_trained_on.toLocaleString()} labelled App A examples.`));
+    // The explanation is the argument this tab exists to make, so it is given
+    // body text and the run facts stay as notes. It was a .note: 11.5px grey,
+    // the same weight as a stray footnote, for the load-bearing sentence.
+    out.appendChild(el('p','explain',d.explanation));
     const t=el('table');
-    t.innerHTML='<thead><tr><th>system</th><th class="num">accuracy</th><th class="num">95% CI</th><th class="num">n</th><th></th></tr></thead>';
+    t.innerHTML='<thead><tr><th scope="col">system</th><th scope="col" class="num">accuracy</th>'+
+      '<th scope="col" class="num">95% CI</th><th scope="col" class="num">n</th><th></th></tr></thead>';
     const tb=el('tbody');
     Object.entries(d.systems).forEach(([k,s])=>{
       const tr=el('tr');
@@ -347,11 +846,20 @@ $('#sRun').onclick = async ()=>{
       }
       tb.appendChild(tr);
     });
-    t.appendChild(tb); out.appendChild(t);
-  }catch(e){ $('#sResults').innerHTML=''; $('#sResults').appendChild(el('div','msg err',String(e))); }
+    t.appendChild(tb); out.appendChild(scrollWrap(t, 'schema swap results table'));
+    $('#sStatus').textContent = `schema-swap test complete; ` +
+      `${Object.keys(d.systems||{}).length} systems scored.`;
+  }catch(e){
+    const out=$('#sResults');
+    if(!out.querySelector('table')){ out.innerHTML=''; out.appendChild(el('div','msg err',String(e))); }
+    $('#sStatus').appendChild(document.createTextNode(' Partial render failed: '+String(e)));
+  }
   finally{ btn.disabled=false; btn.textContent='Run test'; }
 };
 
+// Deep link the tab the URL names, and leave it alone if the hash is not one
+// of ours. Runs at load so a pasted #panel opens the panel.
+selectTab(tabByName(location.hash.slice(1)), false);
 boot();
 </script>
 </body>

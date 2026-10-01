@@ -3,10 +3,14 @@
 Device policy, in order of preference:
   1. CUDA in fp16. Required for throughput on the evidence sweeps. The RTX 2070
      Super is compute capability 7.5 (Turing), so bf16 is unavailable (needs
-     sm_80+) and eager attention is used because DeBERTa-v2 rejects SDPA in
-     transformers 4.x.
-  2. CPU fallback. Works, roughly 20x slower, and the UI says so rather than
-     pretending otherwise.
+     sm_80+) and fp16 is the only mixed-precision option.
+  2. CPU fallback. Works, roughly 9x slower on the 77-label schema (480 ms vs
+     52 ms p50), and the UI says so rather than pretending otherwise.
+
+Attention is not forced here. `from_pretrained` is given no
+`attn_implementation`, so the checkpoint's own `config.json` decides (sdpa for
+this release). `info()` reports what transformers actually resolved instead of a
+policy this file never applied.
 
 Results are cached to disk keyed by (fixture, model, schema fingerprint), so an
 evaluation sweep is paid for once and re-running the UI is instant.
@@ -45,6 +49,14 @@ class Prediction:
     labels: list[str]
     confidence: float | None
     raw: Any
+
+    def to_public(self) -> dict[str, Any]:
+        """Client-facing shape for one head.
+
+        Deliberately not `asdict`: `raw` is the library's unparsed output, which
+        is an implementation detail of `_parse` and not part of the API contract.
+        """
+        return {"labels": list(self.labels), "confidence": self.confidence}
 
 
 @dataclass
@@ -112,6 +124,22 @@ class DecisionEngine:
             self.model_path.name, self.device, self.load_seconds, self.fp16,
         )
 
+    def attention_impl(self) -> str:
+        """The attention implementation in force, resolved rather than assumed.
+
+        `from_pretrained` is not passed `attn_implementation`, so the checkpoint's
+        own config decides and transformers may still fall back from there. Report
+        what was actually resolved. Before the model is loaded there is nothing
+        resolved to report, so say so instead of naming a capability nobody has.
+        """
+        encoder = getattr(self._model, "encoder", None)
+        resolved = getattr(getattr(encoder, "config", None), "_attn_implementation", None)
+        if isinstance(resolved, str) and resolved:
+            return resolved
+        if self._model is None:
+            return "not resolved yet (model not loaded)"
+        return "unknown (resolved value not exposed)"
+
     def info(self) -> dict:
         """Runtime facts the UI shows. Never claims a capability we did not get."""
         import torch
@@ -128,7 +156,7 @@ class DecisionEngine:
                 f"{torch.cuda.get_device_capability(0)[0]}.{torch.cuda.get_device_capability(0)[1]}"
                 if cuda else None
             ),
-            "attention": "eager (DeBERTa-v2 rejects sdpa in transformers 4.x)",
+            "attention": self.attention_impl(),
             "bf16_supported": bool(cuda and torch.cuda.get_device_capability(0)[0] >= 8),
             "loaded": self._model is not None,
             "load_seconds": self.load_seconds,

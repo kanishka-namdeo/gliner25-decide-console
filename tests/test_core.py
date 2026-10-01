@@ -5,13 +5,17 @@ Run: .venv\\Scripts\\python.exe -m pytest tests -q
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.engine import DecisionEngine, Prediction  # noqa: E402
 from app.llm import (  # noqa: E402
     LLMClassifier,
     LLMConfig,
@@ -29,6 +33,8 @@ from app.metrics import (  # noqa: E402
     mcnemar_exact,
     normalise,
 )
+from app.main import Head, _schema_from_heads  # noqa: E402
+from app.main import app as api  # noqa: E402
 
 LABELS = [
     "card_lost",
@@ -70,9 +76,10 @@ def test_extract_label_accepts(reply: str, expected_label: str, expected_valid: 
 @pytest.mark.parametrize(
     "reply,expected_label",
     [
-        # The live endpoint answered "Refund_not_showing_up" where banking77's
-        # schema says "refund_not_showing_up". That label is not in this small
-        # fixture, so the case is reproduced against a schema that has it.
+        # A live endpoint answered a capitalised variant of a banking77 intent,
+        # e.g. `Refund_not_showing_up`. Formatting differences are the same answer,
+        # so they are credited; the direction of the capitalisation is covered by
+        # the dedicated regression test below.
         ("card-lost", "card_lost"),
         ("card lost", "card_lost"),
         ("refund_request.", "refund_request"),
@@ -83,25 +90,36 @@ def test_extract_label_accepts(reply: str, expected_label: str, expected_valid: 
 def test_extract_label_tolerates_cosmetic_variants(reply: str, expected_label: str) -> None:
     """Formatting differences are the same answer, not a wrong one.
 
-    A live endpoint answered 'Refund_not_showing_up' where the schema said
-    'refund_not_showing_up'. Rejecting that would understate the LLM arm on
-    punctuation alone.
+    A live endpoint answered a capitalised variant of a label the schema asked
+    for. Rejecting that would understate the LLM arm on punctuation alone.
     """
     got, valid = classifier()._extract_label(reply, LABELS)
     assert valid is True
     assert got == expected_label
 
 
-def test_extract_label_normalises_the_observed_capitalisation() -> None:
+@pytest.mark.parametrize(
+    "schema_label,reply",
+    [
+        # A live endpoint answered a capitalised variant of a banking77 intent.
+        # Both directions are covered because which side capitalises is not
+        # something this repo controls: banking77's own label set ships
+        # `Refund_not_showing_up`, while a hand-written or LLM-authored schema may
+        # spell it lowercase. A parser that only handles one direction is a
+        # parser waiting for the endpoint's next mood.
+        ("refund_not_showing_up", "Refund_not_showing_up"),
+        ("Refund_not_showing_up", "refund_not_showing_up"),
+    ],
+)
+def test_extract_label_normalises_the_observed_capitalisation(schema_label: str, reply: str) -> None:
     """Regression: the real endpoint's exact failure mode.
 
-    Asked for refund_not_showing_up it answered "Refund_not_showing_up" - a
-    capitalised variant of a label that does exist in banking77. This must be
+    A capitalised variant of a label that does exist in banking77 must be
     accepted, while an invented label stays rejected.
     """
-    schema = ["refund_not_showing_up", "card_lost", "other"]
-    got, valid = classifier()._extract_label("Refund_not_showing_up", schema)
-    assert (got, valid) == ("refund_not_showing_up", True)
+    schema = [schema_label, "card_lost", "other"]
+    got, valid = classifier()._extract_label(reply, schema)
+    assert (got, valid) == (schema_label, True)
 
     # Same shape, but not in the schema: still a failure.
     got2, valid2 = classifier()._extract_label("Refund_returned_twice", schema)
@@ -250,6 +268,54 @@ def test_load_env_file_missing_file_is_not_an_error(tmp_path) -> None:
     assert load_env_file(tmp_path / "absent.env") is False
 
 
+# --- reported capabilities ------------------------------------------------
+
+# The stated reason `info()` was wrong: it hard-coded
+# "eager (DeBERTa-v2 rejects sdpa in transformers 4.x)" while never passing
+# `attn_implementation`, so /api/health advertised a configuration the app never
+# obtained. The checkpoint's own config.json actually says sdpa. `info()` must
+# report what was resolved, and must say so plainly when nothing is resolved yet
+# rather than naming a capability nobody has.
+
+
+def test_attention_is_not_reported_before_the_model_loads() -> None:
+    engine = DecisionEngine(model_path="/nonexistent", prefer_cuda=False)
+    reported = engine.attention_impl()
+    assert "not resolved" in reported, (
+        f"an unloaded engine reported a resolved attention implementation: {reported!r}"
+    )
+
+
+def test_attention_reports_what_the_loaded_model_resolved() -> None:
+    """A resolved implementation is read off the loaded encoder, not assumed."""
+    engine = DecisionEngine(model_path="/nonexistent", prefer_cuda=False)
+
+    class _Encoder:
+        class config:
+            _attn_implementation = "sdpa"
+
+    class _Loaded:
+        encoder = _Encoder()
+
+    engine._model = _Loaded()
+    assert engine.attention_impl() == "sdpa"
+
+
+def test_info_does_not_hard_code_an_attention_implementation() -> None:
+    """`info()` must not contain a literal attention string at all.
+
+    Any baked-in value is by definition a claim about a run that has not
+    happened. A test asserting "eager is correct" would pass straight back if the
+    checkpoint switched to sdpa, so this pins the absence of the literal instead.
+    """
+    source = (Path(__file__).resolve().parents[1] / "app" / "engine.py").read_text(
+        encoding="utf-8"
+    )
+    body = source.split("def info(", 1)[1]
+    assert "eager" not in body, "info() hard-codes an attention implementation"
+    assert "sdpa" not in body, "info() hard-codes an attention implementation"
+
+
 # --- metric semantics ----------------------------------------------------
 
 def test_normalise_accepts_every_payload_shape() -> None:
@@ -363,3 +429,128 @@ def test_macro_f1_depends_on_pairing_not_marginals() -> None:
 
 def test_majority_baseline_handles_empty() -> None:
     assert majority_baseline([])["label"] is None
+
+
+# --- response contract ----------------------------------------------------
+#
+# The browser UI renders these payloads and nothing else. Every field dropped
+# here is a field the panel silently stopped showing, which is how p95, the
+# run-level notes and the LLM cost state went missing without anything failing.
+
+
+def test_public_payload_carries_every_field_the_panel_renders() -> None:
+    res = evaluate_system("x", ["a"] * 10, ["a"] * 10, p50_ms=5.0, p95_ms=9.0, notes=["n"])
+    pub = res.to_public()
+    for field in (
+        "name", "n", "accuracy", "ci_low", "ci_high", "macro_f1",
+        "p50_ms", "p95_ms", "cost_per_1k_usd", "cost_status", "notes",
+    ):
+        assert field in pub, f"the panel cannot render {field}"
+    # p95 is not derivable from p50 and the LLM arm's tail is the interesting
+    # part: p50 9,363 ms against p95 25,321 ms on the measured endpoint.
+    assert pub["p95_ms"] == 9.0
+
+
+def test_public_payload_drops_the_per_item_vector() -> None:
+    """`correct` is needed for pairing, not for display, and it is O(n)."""
+    assert "correct" not in evaluate_system("x", ["a"] * 10, ["a"] * 10).to_public()
+
+
+def test_unpriced_cost_is_distinguishable_from_free() -> None:
+    """A null price means two different things and the client must be told which.
+
+    The UI rendered `cost_per_1k_usd ? ... : "$0.00"`, so a local encoder and an
+    LLM arm with no token price configured both read as free. For the LLM arm
+    that understates its cost by an unknown amount, on the one axis where it is
+    already the weakest.
+    """
+    priced = evaluate_system("llm", ["a"] * 5, ["a"] * 5, cost_per_1k_usd=1.25, cost_status="priced")
+    unpriced = evaluate_system("llm", ["a"] * 5, ["a"] * 5, cost_status="unpriced")
+    local = evaluate_system("encoder", ["a"] * 5, ["a"] * 5)
+
+    assert priced.to_public()["cost_status"] == "priced"
+    assert unpriced.to_public()["cost_per_1k_usd"] is None
+    assert unpriced.to_public()["cost_status"] == "unpriced"
+    assert local.to_public()["cost_status"] == "free"
+
+
+class _StubEngine:
+    """Stands in for DecisionEngine, and deliberately exposes only classify_one.
+
+    /api/route used to call `get_engine().model.classify_text(text, schema, True)`
+    directly. The third positional argument of that library function is
+    `threshold`, not `include_confidence`, so every confidence was silently
+    dropped and the router rendered a dash for every prediction, forever. This
+    stub has no `.model`, so a regression to the direct call fails loudly here
+    rather than shipping a dead confidence column.
+    """
+
+    def __init__(self, predictions: dict) -> None:
+        self._predictions = predictions
+
+    def classify_one(self, text: str, schema: dict, include_confidence: bool = True) -> dict:
+        assert include_confidence is True, "the router must ask for confidence"
+        return self._predictions
+
+
+def test_route_returns_confidence_and_hides_the_raw_payload(monkeypatch) -> None:
+    raw = {"label": "refund_request", "confidence": 0.98, "internal": "not part of the contract"}
+    monkeypatch.setattr(
+        "app.main.get_engine",
+        lambda: _StubEngine({"intent": Prediction("intent", ["refund_request"], 0.98, raw)}),
+    )
+    client = TestClient(api)
+    resp = client.post(
+        "/api/route",
+        json={"text": "charged twice", "heads": [{"name": "intent", "labels": ["refund_request", "other"]}]},
+    )
+    assert resp.status_code == 200
+    head = resp.json()["result"]["intent"]
+    assert head["labels"] == ["refund_request"]
+    assert head["confidence"] == pytest.approx(0.98)
+    # `_parse` normalises several library shapes; the library's own output is
+    # not part of the contract and must not reach the client.
+    assert "raw" not in head and "internal" not in head
+
+
+def test_route_echoes_the_schema_it_was_given() -> None:
+    """The label set is the model's input contract, so the response shows it."""
+    client = TestClient(api)
+    schema = _schema_from_heads([Head(name="intent", labels=["a", "b"])])
+    assert schema == {"intent": ["a", "b"]}
+    assert _schema_from_heads(
+        [Head(name="aspects", labels=["a", "b"], multi_label=True, cls_threshold=0.25)]
+    ) == {"aspects": {"labels": ["a", "b"], "multi_label": True, "cls_threshold": 0.25}}
+    assert _schema_from_heads(
+        [Head(name="intent", labels=["a"], described={"a": "does A"})]
+    ) == {"intent": {"labels": {"a": "does A"}}}
+
+
+def test_route_refuses_an_empty_text_before_touching_the_model() -> None:
+    """Guard rail, not inference: proves the request boundary rejects bad input
+    without needing weights."""
+    client = TestClient(api)
+    resp = client.post("/api/route", json={"text": "   ", "heads": [{"name": "i", "labels": ["a"]}]})
+    assert resp.status_code == 400
+
+
+def test_route_rejects_an_oversized_label_set() -> None:
+    client = TestClient(api)
+    resp = client.post(
+        "/api/route",
+        json={"text": "x", "heads": [{"name": "i", "labels": [f"l{i}" for i in range(513)]}]},
+    )
+    assert resp.status_code == 400
+    assert "512" in resp.json()["detail"]
+
+
+def test_parse_drops_nan_confidence() -> None:
+    """NaN is not valid JSON, and JSON.parse fails on it.
+
+    The library can hand back NaN, and the panel payload already has to survive
+    a floor row whose bootstrap interval is undefined. `_as_float` is the single
+    place that decides this, so it is the place to pin.
+    """
+    parsed = DecisionEngine._parse({"intent": {"label": "a", "confidence": float("nan")}})
+    assert parsed["intent"].confidence is None
+    assert json.dumps(parsed["intent"].to_public()) == '{"labels": ["a"], "confidence": null}'

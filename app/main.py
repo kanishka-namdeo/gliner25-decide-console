@@ -142,11 +142,19 @@ async def route(req: RouteRequest) -> dict:
     if not req.text.strip():
         raise HTTPException(400, "text is empty")
     schema = _schema_from_heads(req.heads)
+    # classify_one, not .model.classify_text directly. The third positional
+    # argument of classify_text is `threshold`, not `include_confidence`, so
+    # calling it positionally with True silently drops every confidence value
+    # and the router had nothing to show. classify_one also runs _parse, keeping
+    # it the single normalisation point for the shapes classify_text returns.
     try:
-        raw = await asyncio.to_thread(get_engine().model.classify_text, req.text, schema, True)
+        result = await asyncio.to_thread(get_engine().classify_one, req.text, schema)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"inference failed: {type(exc).__name__}: {exc}") from exc
-    return {"schema": schema, "result": raw}
+    return {
+        "schema": schema,
+        "result": {head: pred.to_public() for head, pred in result.items()},
+    }
 
 
 @app.post("/api/panel")
