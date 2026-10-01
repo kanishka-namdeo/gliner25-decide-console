@@ -29,11 +29,17 @@ Three surfaces, one engine:
 One engine behind three surfaces, plus the evaluation protocol that makes the
 comparison mean something.
 
-**[Open the architecture diagram →](docs/architecture.html)** — a self-contained
-interactive rendering, committed to the repo. No build step, no external assets,
-no network: open the file in a browser. Its source is
+**[Open the architecture diagram →](https://kanishka-namdeo.github.io/gliner25-decide-console/architecture.html)**
+
+The rendering is committed to the repo at
+[`docs/architecture.html`](docs/architecture.html): self-contained, no build
+step, no external assets, no network. GitHub serves a committed `.html` file as
+sanitised source with its scripts stripped, so the live Pages URL above is the
+one to open in a browser; the committed copy is the one to read after cloning, or
+to diff. Its source is
 [`docs/architecture.source.json`](docs/architecture.source.json), pinned to the
-commit it was generated from.
+commit it was generated from. `pages.yml` republishes `docs/` on every push that
+touches it, so there is one copy and it cannot go stale.
 
 In short: the browser posts to one FastAPI process, which slices a fixture
 **once** so every system scores identical items in identical order, hands that
@@ -257,6 +263,7 @@ app/
 docs/
   architecture.html          committed architecture diagram, self-contained
   architecture.source.json   its source, pinned to the commit it came from
+  AGENTS.md                  how to regenerate it, and what not to put here
 scripts/
   verify_env.py     8 environment assertions (CUDA, arch list, fp16, pins)
   verify_model.py   API behaviour against the model card's documented examples

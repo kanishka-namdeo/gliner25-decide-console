@@ -2,13 +2,16 @@
 
 ## Purpose
 
-CI for the repository. Two jobs, chosen to catch the two failure modes this
-project actually has rather than to exercise the whole app.
+CI for the repository, plus the one workflow that publishes the architecture
+diagram. Two CI jobs, chosen to catch the two failure modes this project
+actually has rather than to exercise the whole app.
 
 ## Ownership
 
-- `workflows/ci.yml` owns the CI definition: triggers, concurrency, and the two
-  jobs.
+| Path | Owns |
+|---|---|
+| `workflows/ci.yml` | the CI definition: triggers, concurrency, and the two jobs |
+| `workflows/pages.yml` | publishing `docs/` to GitHub Pages |
 
 ## Local Contracts
 
@@ -26,6 +29,14 @@ project actually has rather than to exercise the whole app.
   cancels superseded runs in the same group.
 - No job may require a GPU, model weights, or dataset fixtures. Nothing in CI may
   need a secret or a paid endpoint.
+- `pages.yml` is deliberately narrow: it uploads `docs/` verbatim and deploys it.
+  It is the only workflow with more than `contents: read`, and its extra scopes
+  (`pages: write`, `id-token: write`) are the minimum Pages deployment set. It
+  needs no token, no model, and no fixture.
+- Pages is configured to build from the Actions workflow, not from a branch.
+  That is the reason a workflow exists instead of a `gh-pages` branch: the
+  diagram is committed once on `main`, next to the code it describes, and a
+  second copy on another branch is a copy that can silently go stale.
 
 ## Work Guidance
 
@@ -40,6 +51,9 @@ project actually has rather than to exercise the whole app.
 - No workflow may read `.env`. It is gitignored, so CI does not have it, and a job
   that needs credentials would leak its existence. The offline suite covers
   `load_env_file()` and reply parsing against fixtures instead.
+- Anything committed under `docs/` becomes world-readable the moment `pages.yml`
+  succeeds. Keep generated gate receipts, capture PNGs, and authoring scratch out
+  of it — `.archify/` is gitignored for exactly that reason.
 
 ## Verification
 
@@ -47,3 +61,7 @@ project actually has rather than to exercise the whole app.
   request.
 - Reproduce the `tests` job locally with `uv sync --extra dev` followed by
   `uv run pytest tests -q`.
+- After changing anything under `docs/`, confirm the Pages run went green and
+  that `https://kanishka-namdeo.github.io/gliner25-decide-console/` serves the
+  updated file. GitHub renders a committed `.html` file as sanitised source, so
+  the Pages URL is the only way a reader can actually open the diagram.

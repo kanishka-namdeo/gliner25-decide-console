@@ -1,0 +1,51 @@
+# Publishes docs/ as the architecture diagram's public, viewable URL.
+#
+# Why a workflow rather than a gh-pages branch: the diagram is committed once, on
+# main, next to the code it describes. A gh-pages branch would be a second copy
+# that can silently go stale, which is exactly the failure mode this repository
+# spends its whole evaluation protocol defending against.
+#
+# This is the only workflow that needs more than `contents: read`. `pages: write`
+# and `id-token: write` are the minimum Pages deployment set and grant no access
+# to the app, the fixtures, or the model weights.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: [docs/**, .github/workflows/pages.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: publish docs/
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pages is switched to "GitHub Actions" as its build source, so the site is
+      # built from this workflow's artifact rather than from a branch. One-time,
+      # and it is why this file exists at all.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload docs/ as the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4

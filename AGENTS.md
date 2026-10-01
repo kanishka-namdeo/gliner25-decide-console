@@ -35,14 +35,16 @@ not support. Reporting only the flattering half is a defect.
 | Single-file browser UI | `app/static/` |
 | Operator setup, environment and model gates, weight and fixture fetchers | `scripts/` |
 | Offline test suite | `tests/` |
-| CI jobs | `.github/` |
+| CI jobs, Pages publishing | `.github/` |
 | Dependency pins, CUDA index, pytest config | `pyproject.toml` |
 | Narrative results, protocol description, layout, known limits | `README.md` |
 | Contributor workflow and evaluation-code rules | `CONTRIBUTING.md` |
+| Architecture diagram source and its rendered output | `docs/` |
 
 Runtime artifacts are generated and unowned: `models/`, `data/fixtures/`,
 `results/`. All are gitignored. Do not commit them, and do not treat edits to
-them as source changes.
+them as source changes. `.archify/` is diagram-authoring scratch and is likewise
+gitignored; `docs/architecture.source.json` is the source of record.
 
 ## Local Contracts
 
@@ -179,4 +181,5 @@ not asserting what its name says.
 - `app/static/AGENTS.md` — the single-file browser UI, no build step
 - `scripts/AGENTS.md` — environment and model gates, weight and fixture fetchers
 - `tests/AGENTS.md` — the offline test suite
-- `.github/AGENTS.md` — CI jobs
+- `.github/AGENTS.md` — CI jobs and Pages publishing
+- `docs/AGENTS.md` — the architecture diagram and how to regenerate it
