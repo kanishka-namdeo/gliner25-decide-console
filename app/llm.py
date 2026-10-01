@@ -21,6 +21,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -61,6 +62,30 @@ class LLMResponse:
         )
 
 
+def load_env_file(path: str | Path = ".env") -> bool:
+    """Read LLM_* settings from a .env file into os.environ.
+
+    Deliberately not a dependency: python-dotenv would be another pin to
+    justify, and this is six lines. Existing environment variables win, so a
+    shell export overrides the file, which is what an operator expects when
+    debugging a bad key.
+    """
+    env_path = Path(path)
+    if not env_path.exists():
+        return False
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+    return True
+
+
 @dataclass
 class LLMConfig:
     base_url: str | None
@@ -73,6 +98,9 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
+        # Load .env before reading, so a saved key works without the operator
+        # having to export it in every shell. Environment wins over the file.
+        load_env_file()
         base = os.getenv("LLM_BASE_URL", "").strip() or None
         return cls(
             base_url=base,
@@ -142,26 +170,43 @@ class LLMClassifier:
     def _extract_label(self, content: str, labels: list[str]) -> tuple[str | None, bool]:
         """Pull one label out of the reply and confirm it is really in the list.
 
-        Models wrap answers in quotes, prose, or code fences; also accept a
-        position number ("3") since some models prefer that.
+        Tolerates the cosmetic variations models actually produce: surrounding
+        quotes or code fences, trailing prose on the line, a capitalised
+        `Refund_not_showing_up`, or a hyphenated `card-lost`. Those are the same
+        answer, and counting them wrong would understate the LLM arm.
+
+        A reply that is *not* a variant of a real label stays invalid: inventing
+        a label outside the schema is a genuine error, not a formatting quirk.
+
+        Also accepts a position number ("3"), since some models prefer that.
         """
+        lookup = {label.lower(): label for label in labels}
         text = content.strip().strip("`").strip()
         text = text.splitlines()[0].strip() if text else ""
-        cleaned = text.strip(" \"'.,").lower()
+        if not text:
+            return None, False
 
-        if cleaned in labels:
-            return cleaned, True
-        for label in labels:  # longest first, so "card_lost" beats "card"
-            if cleaned.startswith(label):
-                return label, True
-        if cleaned.isdigit():
-            idx = int(cleaned)
+        # Normalise separators and case: "Card-Lost" -> "card_lost".
+        key = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+        if key in lookup:
+            return lookup[key], True
+
+        # Tolerate a short lead-in ("The answer is card_pin_change") by asking
+        # whether the reply *ends* with a label at a separator boundary. Keeping
+        # compound labels intact matters: splitting on "_" would turn
+        # card_pin_change into card/pin/change and never match it. Requiring the
+        # boundary still refuses open-ended prose, because a sentence that merely
+        # ends in a label word has no separator in front of it.
+        for lower in sorted(lookup, key=len, reverse=True):
+            if key.endswith("_" + lower):
+                return lookup[lower], True
+
+        if key.isdigit():
+            idx = int(key)
             if 0 <= idx < len(labels):
                 return labels[idx], True
-        # Last resort: an exact substring match anywhere in the reply.
-        for label in labels:
-            if re.search(rf"\b{re.escape(label)}\b", content.lower()):
-                return label, True
+
         return None, False
 
     async def classify(

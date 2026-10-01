@@ -132,34 +132,66 @@ def run_baseline(
 
 
 async def run_llm(
-    texts: list[str], labels: list[str], timeout_s: float | None = None
-) -> tuple[list[str | None], float, float, list[str]]:
-    """Classify via the configured endpoint. Serial by design: these are
-    sequential API calls and hammering them in parallel would be rude."""
+    texts: list[str],
+    labels: list[str],
+    timeout_s: float | None = None,
+    concurrency: int = 4,
+    progress=None,
+) -> tuple[list[str | None], float, float, list[str], int]:
+    """Classify via the configured endpoint.
+
+    Concurrency is bounded and modest. A serial loop is correct but useless at
+    real API latency (measured ~6-7 s per call against DashScope), while
+    unbounded parallelism would hammer the endpoint and invite rate limiting.
+    Order of results is preserved regardless of completion order, which matters
+    because the paired significance tests assume identical item ordering.
+    """
     from .llm import LLMClassifier
 
     client = LLMClassifier()
     if not client.config.configured:
         raise RuntimeError("LLM arm not configured")
 
-    preds: list[str | None] = []
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+    preds: list[str | None] = [None] * len(texts)
     latencies: list[float] = []
     total_cost = 0.0
     errors: list[str] = []
-    for text in texts:
-        try:
-            resp = await asyncio.wait_for(client.classify(text, labels), timeout=timeout_s)
-        except asyncio.TimeoutError:
-            preds.append(None)
-            errors.append("timeout")
-            continue
-        preds.append(resp.label)
-        if resp.latency_ms:
-            latencies.append(resp.latency_ms)
-        total_cost += resp.cost_usd
-        if resp.error:
-            errors.append(resp.error)
-    return preds, (statistics.median(latencies) if latencies else 0.0), total_cost, errors
+    done = 0
+    lock = asyncio.Lock()
+
+    async def one(index: int, text: str) -> None:
+        nonlocal done, total_cost
+        async with semaphore:
+            try:
+                resp = await asyncio.wait_for(client.classify(text, labels), timeout=timeout_s)
+            except asyncio.TimeoutError:
+                async with lock:
+                    errors.append("timeout")
+                    done += 1
+                return
+            except Exception as exc:  # noqa: BLE001
+                async with lock:
+                    errors.append(f"{type(exc).__name__}: {exc}")
+                    done += 1
+                return
+            async with lock:
+                preds[index] = resp.label
+                if resp.latency_ms:
+                    latencies.append(resp.latency_ms)
+                total_cost += resp.cost_usd
+                if resp.error:
+                    errors.append(resp.error)
+                done += 1
+                if progress:
+                    progress(done, len(texts))
+
+    await asyncio.gather(*(one(i, t) for i, t in enumerate(texts)))
+    await client.aclose()
+
+    p50 = statistics.median(latencies) if latencies else 0.0
+    p95 = sorted(latencies)[int(0.95 * len(latencies))] if latencies else 0.0
+    return preds, p50, p95, total_cost, errors
 
 
 # --- panel ---------------------------------------------------------------
@@ -170,8 +202,14 @@ async def run_panel(
     systems: list[str] | None = None,
     described: bool = False,
     batch_size: int = 16,
+    llm_concurrency: int = 4,
 ) -> dict[str, Any]:
-    """Score every requested system on one fixture and pair them up."""
+    """Score every requested system on one fixture and pair them up.
+
+    llm_concurrency matters more than it looks: measured against DashScope at
+    ~6-7 s per call, a serial loop would take ~16 minutes for a 300-item row.
+    Bounded concurrency cuts that roughly in half while staying polite.
+    """
     from .engine import get_engine
     from .llm import LLMConfig
 
@@ -250,22 +288,43 @@ async def run_panel(
             })
         else:
             try:
-                preds, p50, cost, errors = await run_llm(texts, fixture.label_names)
+                def tick(done: int, total: int) -> None:
+                    # Deliberately sync: run_llm awaits progress() inside a lock,
+                    # so an async callback here would be created but never awaited.
+                    log.info("llm progress %d/%d", done, total)
+
+                started = time.perf_counter()
+                preds, p50, p95, cost, errors = await run_llm(
+                    texts, fixture.label_names, concurrency=llm_concurrency, progress=tick
+                )
+                llm_seconds = time.perf_counter() - started
+                if len(texts) > 20:
+                    notes.append(
+                        f"llm arm took {llm_seconds:.0f}s for {len(texts)} items "
+                        f"(~{llm_seconds / len(texts):.1f}s/item at concurrency "
+                        f"{llm_concurrency}); lower the item count for a faster row"
+                    )
                 invalid = sum(1 for p in preds if p is None)
+                cfg = LLMConfig.from_env()
+                priced = bool(cfg.input_per_mtok or cfg.output_per_mtok)
                 res = evaluate_system(
-                    SYSTEM_LABELS["llm"],
+                    f"LLM ({cfg.model}, zero-shot)",
                     [p if p is not None else "__none__" for p in preds],
                     gold,
                     p50_ms=p50,
-                    cost_per_1k_usd=(cost / len(texts) * 1000) if cost else 0.0,
+                    p95_ms=p95,
+                    cost_per_1k_usd=(cost / len(texts) * 1000) if (cost and priced) else None,
                     notes=[
                         "zero-shot, label list only (no descriptions)",
-                        f"{invalid}/{len(preds)} replies unusable",
+                        f"measured over {len(preds) - invalid}/{len(preds)} replies",
+                        *([f"{invalid} replies unusable, counted as wrong"] if invalid else []),
+                        *(
+                            [] if priced
+                            else ["cost not priced: set LLM_INPUT_PER_MTOK / LLM_OUTPUT_PER_MTOK"]
+                        ),
                         *([f"first error: {errors[0]}"] if errors else []),
                     ],
                 )
-                if invalid:
-                    res.notes.append("unusable replies counted as wrong")
                 results.append(res)
             except Exception as exc:  # noqa: BLE001
                 unavailable.append({"system": SYSTEM_LABELS["llm"], "reason": f"{type(exc).__name__}: {exc}"})

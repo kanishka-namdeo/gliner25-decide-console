@@ -164,8 +164,11 @@ const SYSTEMS = [
   ['tfidf','TF-IDF + LR'],
   ['minilm','MiniLM + LR'],
   ['roberta','RoBERTa fine-tuned'],
-  ['llm','LLM zero-shot'],
+  ['llm','LLM zero-shot (slow)'],
 ];
+// Measured against a real endpoint at ~6-7 s per call, so cap the item count
+// when the LLM arm is selected. Above this the row alone exceeds ten minutes.
+const LLM_SLOW_AFTER = 120;
 const selected = new Set(['gliner','tfidf']);
 
 /* ---------- tabs ---------- */
@@ -246,7 +249,19 @@ SYSTEMS.forEach(([key,label])=>{
 
 $('#pRun').onclick = async ()=>{
   const btn = $('#pRun'); btn.disabled=true; btn.textContent='Scoring…'; $('#pOut').hidden=false;
-  $('#pResults').innerHTML='<div class="note">running; a fine-tuned baseline may take a minute on first use…</div>';
+  const wantLLM = selected.has('llm');
+  const n = +$('#pLimit').value;
+  if (wantLLM && n > LLM_SLOW_AFTER) {
+    const ok = confirm(
+      `The LLM arm takes seconds per item.\n\n` +
+      `${n} items will take roughly ${Math.round(n * 3)} minutes at the current ` +
+      `concurrency, and the request may time out.\n\nRun ${LLM_SLOW_AFTER} items instead?`);
+    if (!ok) { btn.disabled=false; btn.textContent='Run panel'; return; }
+    $('#pLimit').value = LLM_SLOW_AFTER;
+  }
+  $('#pResults').innerHTML = wantLLM
+    ? '<div class="note">running; the LLM arm is the slow part and reports progress in the server log…</div>'
+    : '<div class="note">running; a fine-tuned baseline may take a minute on first use…</div>';
   $('#pCompare').innerHTML=''; $('#pUnavailable').innerHTML='';
   try{
     const d = await (await fetch('/api/panel',{method:'POST',headers:{'Content-Type':'application/json'},

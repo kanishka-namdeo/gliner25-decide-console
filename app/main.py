@@ -72,6 +72,9 @@ class PanelRequest(BaseModel):
     systems: list[str] | None = None
     described: bool = False
     batch_size: int = 16
+    # The LLM arm costs seconds per item, so the ceiling is low by default to
+    # keep a panel run interactive. Raise it deliberately.
+    llm_concurrency: int = Field(4, ge=1, le=16)
 
 
 class SwapRequest(BaseModel):
@@ -152,6 +155,7 @@ async def panel(req: PanelRequest) -> dict:
         return await run_panel(
             req.fixture, limit=req.limit, systems=req.systems,
             described=req.described, batch_size=req.batch_size,
+            llm_concurrency=req.llm_concurrency,
         )
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc

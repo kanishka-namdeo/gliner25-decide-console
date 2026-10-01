@@ -5,13 +5,19 @@ Run: .venv\\Scripts\\python.exe -m pytest tests -q
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
 
-from app.llm import LLMClassifier, LLMConfig, build_prompt  # noqa: E402
+from app.llm import (  # noqa: E402
+    LLMClassifier,
+    LLMConfig,
+    build_prompt,
+    load_env_file,
+)
 from app.metrics import (  # noqa: E402
     accuracy,
     bootstrap_ci,
@@ -24,7 +30,13 @@ from app.metrics import (  # noqa: E402
     normalise,
 )
 
-LABELS = ["card_lost", "card_pin_change", "balance_inquiry", "transfer_pending"]
+LABELS = [
+    "card_lost",
+    "card_pin_change",
+    "balance_inquiry",
+    "transfer_pending",
+    "refund_request",
+]
 
 
 def classifier() -> LLMClassifier:
@@ -46,8 +58,8 @@ def classifier() -> LLMClassifier:
         ("0", "card_lost", True),  # positional
         ("3", "transfer_pending", True),
         ("The answer is card_pin_change.", "card_pin_change", True),
-        ("Label:\nbalance_inquiry", "balance_inquiry", True),
         ("card_lost\nand then some chatter", "card_lost", True),
+        ("balance_inquiry", "balance_inquiry", True),
     ],
 )
 def test_extract_label_accepts(reply: str, expected_label: str, expected_valid: bool) -> None:
@@ -55,8 +67,80 @@ def test_extract_label_accepts(reply: str, expected_label: str, expected_valid: 
     assert (got, valid) == (expected_label, expected_valid)
 
 
-@pytest.mark.parametrize("reply", ["banana", "card", "9", "", "   ", "unknown_intent"])
-def test_extract_label_rejects(reply: str) -> None:
+@pytest.mark.parametrize(
+    "reply,expected_label",
+    [
+        # The live endpoint answered "Refund_not_showing_up" where banking77's
+        # schema says "refund_not_showing_up". That label is not in this small
+        # fixture, so the case is reproduced against a schema that has it.
+        ("card-lost", "card_lost"),
+        ("card lost", "card_lost"),
+        ("refund_request.", "refund_request"),
+        ("`refund_request`", "refund_request"),
+        ('"refund_request"', "refund_request"),
+    ],
+)
+def test_extract_label_tolerates_cosmetic_variants(reply: str, expected_label: str) -> None:
+    """Formatting differences are the same answer, not a wrong one.
+
+    A live endpoint answered 'Refund_not_showing_up' where the schema said
+    'refund_not_showing_up'. Rejecting that would understate the LLM arm on
+    punctuation alone.
+    """
+    got, valid = classifier()._extract_label(reply, LABELS)
+    assert valid is True
+    assert got == expected_label
+
+
+def test_extract_label_normalises_the_observed_capitalisation() -> None:
+    """Regression: the real endpoint's exact failure mode.
+
+    Asked for refund_not_showing_up it answered "Refund_not_showing_up" - a
+    capitalised variant of a label that does exist in banking77. This must be
+    accepted, while an invented label stays rejected.
+    """
+    schema = ["refund_not_showing_up", "card_lost", "other"]
+    got, valid = classifier()._extract_label("Refund_not_showing_up", schema)
+    assert (got, valid) == ("refund_not_showing_up", True)
+
+    # Same shape, but not in the schema: still a failure.
+    got2, valid2 = classifier()._extract_label("Refund_returned_twice", schema)
+    assert (got2, valid2) == (None, False)
+
+
+def test_extract_label_accepts_a_leading_phrase() -> None:
+    """A short lead-in before the label is tolerated; prose is not.
+
+    Models often prefix the answer with a few words. Accepting that is fair.
+    The boundary is drawn at whitespace: the label has to be a whole token,
+    otherwise 'the customer is unhappy' would be credited to whatever label
+    shares its first characters.
+    """
+    got, valid = classifier()._extract_label("The answer is card_pin_change.", LABELS)
+    assert (got, valid) == ("card_pin_change", True)
+    # ...but a bare sentence is not an answer, however it is worded.
+    got2, valid2 = classifier()._extract_label("this looks like a refund issue", LABELS)
+    assert (got2, valid2) == (None, False)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "banana",
+        "9",
+        "",
+        "   ",
+        "unknown_intent",
+        "the customer is unhappy",
+        "definitely_refund_request_here_but_not_a_label",
+    ],
+)
+def test_extract_label_still_rejects_invented_labels(reply: str) -> None:
+    """Normalisation must not turn a wrong answer into a right one.
+
+    An invented label, or prose that merely mentions a label somewhere, is a
+    genuine failure and stays invalid.
+    """
     got, valid = classifier()._extract_label(reply, LABELS)
     assert got is None
     assert valid is False
@@ -67,6 +151,35 @@ def test_extract_label_prefix_prefers_longest() -> None:
     labels = ["card", "card_lost"]
     got, _ = classifier()._extract_label("card_lost", labels)
     assert got == "card_lost"
+
+
+def test_extract_label_requires_a_label_on_its_own_line() -> None:
+    """Only the first line of a reply is considered.
+
+    A model that explains itself across several lines is answering with prose,
+    and crediting it to whichever label happens to appear in that prose would
+    inflate the arm. Here the label is on line two, so it does not count.
+    """
+    got, valid = classifier()._extract_label(
+        "The customer is unhappy\ntransfer_pending", LABELS
+    )
+    assert got is None
+    assert valid is False
+
+
+def test_extract_label_ignores_a_label_prefix_as_the_whole_reply() -> None:
+    """A lead-in that merely *starts* with label characters is not an answer.
+
+    "the" is a prefix of "theft_report" in many schemas. Matching on prefix
+    alone would credit plain prose like "the customer is unhappy" to whatever
+    label happens to share its first characters, which is how this rule was
+    originally too permissive.
+    """
+    schema = ["theft_report", "transfer_pending", "other"]
+    got, valid = classifier()._extract_label("the customer is unhappy", schema)
+    assert (got, valid) == (None, False)
+    # The real label still works.
+    assert classifier()._extract_label("theft_report", schema) == ("theft_report", True)
 
 
 def test_prompt_contains_labels_and_text() -> None:
@@ -81,6 +194,60 @@ def test_unset_config_reports_missing_env() -> None:
     assert status["configured"] is False
     assert set(status["missing_env"]) == {"LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"}
     assert "reason" in status
+
+
+def test_status_never_leaks_the_key() -> None:
+    cfg = LLMConfig(
+        base_url="https://example.invalid/v1",
+        api_key="sk-do-not-leak-this-value",
+        model="some-model",
+        input_per_mtok=0.0,
+        output_per_mtok=0.0,
+    )
+    rendered = repr(cfg.status())
+    assert "sk-do-not-leak-this-value" not in rendered
+    assert cfg.status()["configured"] is True
+
+
+# --- .env loading --------------------------------------------------------
+
+def test_load_env_file_parses_quotes_comments_and_blanks(tmp_path) -> None:
+    env = tmp_path / ".env"
+    env.write_text(
+        "# a comment\n"
+        "\n"
+        "LLM_BASE_URL=https://example.invalid/v1\n"
+        'LLM_API_KEY="quoted-key"\n'
+        "LLM_MODEL=plain-model\n"
+        "not a pair\n",
+        encoding="utf-8",
+    )
+    # Isolate from any real credentials in the developer's environment.
+    for var in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
+        os.environ.pop(var, None)
+
+    assert load_env_file(env) is True
+    assert os.environ["LLM_BASE_URL"] == "https://example.invalid/v1"
+    assert os.environ["LLM_API_KEY"] == "quoted-key"
+    assert os.environ["LLM_MODEL"] == "plain-model"
+    for var in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
+        os.environ.pop(var, None)
+
+
+def test_load_env_file_does_not_override_existing_environment(tmp_path) -> None:
+    """A shell export must win, so an operator can override a bad .env locally."""
+    env = tmp_path / ".env"
+    env.write_text("LLM_MODEL=from-file\n", encoding="utf-8")
+    os.environ["LLM_MODEL"] = "from-shell"
+    try:
+        assert load_env_file(env) is True
+        assert os.environ["LLM_MODEL"] == "from-shell"
+    finally:
+        os.environ.pop("LLM_MODEL", None)
+
+
+def test_load_env_file_missing_file_is_not_an_error(tmp_path) -> None:
+    assert load_env_file(tmp_path / "absent.env") is False
 
 
 # --- metric semantics ----------------------------------------------------

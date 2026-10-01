@@ -38,6 +38,21 @@ Both gaps are significant (McNemar p ≈ 6.5e-06). If you have a fixed taxonomy
 and 10,000 labelled examples, fine-tune something. That is the honest
 recommendation and the app says so.
 
+A frontier LLM does not rescue it either. Adding `qwen3.7-plus` (zero-shot, bare
+label list, no per-label descriptions — the encoder arm gets those on banking77)
+to the same 60 items:
+
+| system | accuracy | 95% CI | macro-F1 | p50 | p95 |
+|---|---|---|---|---|---|
+| GLiNER2.5-Decide | 75.0% | [63.3, 85.0] | 0.598 | 66 ms | 72 ms |
+| TF-IDF + logistic regression | 96.7% | [91.7, 100.0] | 0.953 | 1 ms | 3 ms |
+| qwen3.7-plus (zero-shot) | 91.7% | [83.3, 98.3] | 0.846 | **9,363 ms** | **25,321 ms** |
+
+So the LLM lands between the encoder and a supervised baseline on accuracy, at
+roughly **140x the encoder's latency** and non-zero marginal cost. On this axis it
+is not the answer — the paper's finding is that it only earns its price where the
+schema moves or labels are scarce.
+
 But when the taxonomy **moves**, the ordering inverts categorically. Split
 banking77's intents into two disjoint halves:
 
@@ -102,8 +117,7 @@ uv run uvicorn app.main:app --port 8765
 
 ### Optional: the LLM comparison arm
 
-Set these in `.env` (gitignored — do not paste keys into a prompt or commit
-them):
+Copy `.env.example` to `.env` and fill it in:
 
 ```
 LLM_BASE_URL=https://your-endpoint/v1
@@ -111,12 +125,25 @@ LLM_API_KEY=...
 LLM_MODEL=...
 ```
 
-Any OpenAI-compatible `/chat/completions` endpoint works; the client speaks
-plain HTTP rather than using the OpenAI SDK. Following the paper's protocol, the
-model is shown the bare label list and no per-label descriptions, so the
-comparison is not handicapped against the encoder arm on banking77. If unset,
-the panel shows the LLM as unavailable with the specific missing variables
-rather than omitting it or inventing a number.
+`app/llm.py` reads `.env` at startup — no dependency, six lines, and existing
+environment variables win so a shell export overrides the file. Any
+OpenAI-compatible `/chat/completions` endpoint works — the
+client speaks plain HTTP rather than using the OpenAI SDK, so it has no SDK
+version coupling. Following the paper's protocol, the model is shown the bare
+label list and no per-label descriptions, so the comparison is not handicapped
+against the encoder arm on banking77. If unset, the panel reports the LLM as
+unavailable and names the missing variables rather than omitting it or inventing
+a number.
+
+**Do not paste keys into a prompt, issue, or commit.** A key shared in a
+conversation should be treated as exposed and rotated.
+
+**The LLM arm is slow — budget for it.** Measured at 6-7 s per call, so a
+300-item row takes ~16 minutes at concurrency 4. The UI caps the item count when
+the arm is selected, and the panel reports the per-item cost. Token prices
+default to 0 and display as unpriced; set `LLM_INPUT_PER_MTOK` and
+`LLM_OUTPUT_PER_MTOK` for your endpoint rather than trusting a figure that will go
+stale.
 
 ## Fixtures
 
@@ -152,6 +179,14 @@ Two data notes that changed results:
   warns when you ask for this on a big schema.
 - Batching is nearly pointless on CPU (1.2x) and better on GPU; batch 8–16 is
   the sweet spot, batch 32 is slower.
+- The LLM arm costs **6-7 s per call** against a real endpoint, ~2.9 s/item at
+  concurrency 4. That is ~140x the encoder's p50 and the reason the UI caps item
+  count for that arm.
+- LLM replies are normalised before scoring: case, quotes, separators and a
+  short lead-in are treated as the same answer. Observed from the live endpoint:
+  it answered `Refund_not_showing_up` where the schema said
+  `refund_not_showing_up`. An invented label outside the schema is still scored
+  wrong — loosening the parser must not also inflate the arm.
 
 ## Layout
 
@@ -171,7 +206,7 @@ scripts/
   fetch_model.py    resumable weight download (uv and hf_hub restart from zero)
   fetch_fixtures.py dataset sampling and manifests
 tests/
-  test_core.py      34 offline tests: parsing, metrics, degenerate cases
+  test_core.py      48 offline tests: parsing, metrics, degenerate cases
 ```
 
 Predictions cache to `results/` keyed by a schema fingerprint, so re-running a
@@ -190,3 +225,9 @@ cache can never be silently reused.
   the largest available encoder. A stronger supervised baseline would narrow
   the banking77 gap further, so the reported gap is a **lower bound** on how far
   fine-tuning can pull ahead.
+- The LLM figures come from **one endpoint and one model** (`qwen3.7-plus`), on
+  60 items. That is a demonstration that the arm works end to end, not a
+  benchmark of LLMs generally. The interval is wide and the paper's own CLINC150
+  result put a comparable model at statistical parity with a supervised encoder
+  on a 150-way schema. Re-run it against your own endpoint before drawing
+  conclusions.
