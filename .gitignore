@@ -39,6 +39,12 @@ data/fixtures/*.csv
 data/fixtures/*.json
 data/raw/
 
+# --- diagram authoring scratch ------------------------------------------
+# Archify's working folder: the candidate source plus every intermediate gate
+# receipt and browser-check artifact from a render. Only the reviewed output
+# under docs/ is committed, so this must never be.
+.archify/
+
 # --- editors / OS ------------------------------------------------------
 .vscode/
 .idea/

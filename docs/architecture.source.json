@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "GLiNER2.5-Decide evaluation console",
+    "output": ".archify/architecture-console-20261002-101500/console-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/kanishka-namdeo/gliner25-decide-console.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "8b032e9578be345249b9907565b394b75c7e80e2"
+    }
+  },
+  "components": [
+    {
+      "id": "operator",
+      "type": "frontend",
+      "label": "Operator",
+      "sublabel": "browser console",
+      "pos": [40, 230],
+      "size": [200, 64],
+      "sources": [
+        { "path": "app/static/index.html", "line": 546, "label": "POST /api/route" },
+        { "path": "app/static/index.html", "line": 665, "label": "POST /api/panel" },
+        { "path": "app/main.py", "line": 185, "label": "serves the shell" }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI API",
+      "sublabel": "uvicorn :8765 · async",
+      "tag": "asyncio.to_thread",
+      "pos": [360, 230],
+      "size": [220, 64],
+      "sources": [
+        { "path": "app/main.py", "line": 49, "label": "FastAPI app" },
+        { "path": "app/main.py", "line": 141, "label": "POST /api/route" },
+        { "path": "app/main.py", "line": 161, "label": "POST /api/panel" }
+      ]
+    },
+    {
+      "id": "fixture_store",
+      "type": "database",
+      "label": "Eval fixtures",
+      "sublabel": "data/fixtures/*.csv",
+      "pos": [40, 70],
+      "size": [200, 64],
+      "sources": [
+        { "path": "app/fixtures.py", "line": 91, "label": "reads the csv" },
+        { "path": "scripts/fetch_fixtures.py", "line": 109, "label": "writes the csv" },
+        { "path": "scripts/fetch_fixtures.py", "line": 182, "label": "five public datasets" }
+      ]
+    },
+    {
+      "id": "fixtures",
+      "type": "backend",
+      "label": "Fixture + schema loader",
+      "sublabel": "builds the call-time label set",
+      "pos": [360, 70],
+      "size": [220, 64],
+      "sources": [
+        { "path": "app/fixtures.py", "line": 80, "label": "lru_cached load" },
+        { "path": "app/fixtures.py", "line": 40, "label": "schema()" },
+        { "path": "app/fixtures.py", "line": 129, "label": "split_labels seed 0" }
+      ]
+    },
+    {
+      "id": "panel",
+      "type": "backend",
+      "label": "Panel orchestrator",
+      "sublabel": "run_panel · schema-swap",
+      "tag": "one shared item slice",
+      "pos": [690, 230],
+      "size": [220, 72],
+      "sources": [
+        { "path": "app/evaluate.py", "line": 199, "label": "run_panel" },
+        { "path": "app/evaluate.py", "line": 390, "label": "run_schema_swap" },
+        { "path": "app/evaluate.py", "line": 44, "label": "single limit slice" }
+      ]
+    },
+    {
+      "id": "metrics",
+      "type": "backend",
+      "label": "Evaluation protocol",
+      "sublabel": "exact-set · bootstrap CI · McNemar",
+      "tag": "seed 0",
+      "pos": [1050, 230],
+      "size": [240, 72],
+      "sources": [
+        { "path": "app/metrics.py", "line": 50, "label": "exact_set_match" },
+        { "path": "app/metrics.py", "line": 65, "label": "bootstrap_ci" },
+        { "path": "app/metrics.py", "line": 121, "label": "exact McNemar" }
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "GLiNER2.5-Decide engine",
+      "sublabel": "gliner2 AutoExtractor",
+      "tag": "lazy load · CUDA fp16",
+      "pos": [360, 400],
+      "size": [220, 72],
+      "sources": [
+        { "path": "app/engine.py", "line": 73, "label": "DecisionEngine" },
+        { "path": "app/engine.py", "line": 96, "label": "device policy, fp16" },
+        { "path": "app/engine.py", "line": 127, "label": "attention reported, not assumed" }
+      ]
+    },
+    {
+      "id": "baselines",
+      "type": "backend",
+      "label": "Supervised baselines",
+      "sublabel": "TF-IDF · MiniLM · RoBERTa FT",
+      "tag": "fixed taxonomy head",
+      "pos": [690, 400],
+      "size": [220, 72],
+      "sources": [
+        { "path": "app/baselines.py", "line": 70, "label": "TfidfLogReg" },
+        { "path": "app/baselines.py", "line": 176, "label": "FineTunedEncoder" },
+        { "path": "app/evaluate.py", "line": 71, "label": "run_baseline" }
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "backend",
+      "label": "LLM arm client",
+      "sublabel": "httpx · concurrency 4",
+      "pos": [1050, 400],
+      "size": [240, 72],
+      "sources": [
+        { "path": "app/llm.py", "line": 146, "label": "LLMClassifier" },
+        { "path": "app/llm.py", "line": 212, "label": "classify()" },
+        { "path": "app/evaluate.py", "line": 134, "label": "run_llm" }
+      ]
+    },
+    {
+      "id": "checkpoint",
+      "type": "database",
+      "label": "Checkpoint",
+      "sublabel": "models/GLiNER2.5-Decide",
+      "tag": "340M · ~1.9 GB",
+      "pos": [340, 560],
+      "size": [200, 64],
+      "sources": [
+        { "path": "app/engine.py", "line": 41, "label": "MODEL_DIR" },
+        { "path": "app/engine.py", "line": 96, "label": "checkpoint gate" },
+        { "path": "scripts/fetch_model.py", "line": 115, "label": "resumed download" }
+      ]
+    },
+    {
+      "id": "train_split",
+      "type": "database",
+      "label": "Train splits",
+      "sublabel": "data/fixtures/*_train.csv",
+      "tag": "banking77 · clinc150",
+      "pos": [560, 560],
+      "size": [200, 64],
+      "sources": [
+        { "path": "app/baselines.py", "line": 47, "label": "_load_train" },
+        { "path": "scripts/fetch_fixtures.py", "line": 190, "label": "--with-train" },
+        { "path": "scripts/fetch_fixtures.py", "line": 182, "label": "the only two" }
+      ]
+    },
+    {
+      "id": "llm_endpoint",
+      "type": "external",
+      "label": "OpenAI-compatible endpoint",
+      "sublabel": "LLM_BASE_URL · Bearer key",
+      "tag": "key from .env, never logged",
+      "pos": [1050, 560],
+      "size": [240, 64],
+      "sources": [
+        { "path": "app/llm.py", "line": 151, "label": "POST /chat/completions" },
+        { "path": "app/llm.py", "line": 159, "label": "Authorization header" },
+        { "path": "app/llm.py", "line": 118, "label": "status names missing vars" }
+      ]
+    },
+    {
+      "id": "cache",
+      "type": "database",
+      "label": "results/",
+      "sublabel": "prediction cache · fitted baseline artifacts",
+      "tag": "schema-fingerprint key",
+      "pos": [360, 700],
+      "size": [930, 64],
+      "sources": [
+        { "path": "app/engine.py", "line": 285, "label": "cached_run" },
+        { "path": "app/evaluate.py", "line": 32, "label": "artifact dir" },
+        { "path": "app/evaluate.py", "line": 91, "label": "joblib.dump" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Outbound only — the one credential boundary",
+      "wraps": ["llm", "llm_endpoint"]
+    }
+  ],
+  "connections": [
+    { "id": "operator-to-api", "from": "operator", "to": "api", "label": "POST /api/*" },
+    { "id": "api-to-panel", "from": "api", "to": "panel", "label": "run_panel()" },
+    { "id": "api-to-engine", "from": "api", "to": "engine", "label": "POST /api/route", "variant": "emphasis" },
+    { "id": "fixture-store-to-loader", "from": "fixture_store", "to": "fixtures", "label": "CSV + manifest" },
+    { "id": "loader-to-panel", "from": "fixtures", "to": "panel", "label": "gold slice + schema" },
+    { "id": "panel-to-engine", "from": "panel", "to": "engine", "label": "cached_run()" },
+    { "id": "panel-to-baselines", "from": "panel", "to": "baselines", "label": "fit + predict" },
+    { "id": "panel-to-llm", "from": "panel", "to": "llm", "label": "asyncio.gather" },
+    { "id": "panel-to-metrics", "from": "panel", "to": "metrics", "label": "paired tests + CIs" },
+    { "id": "engine-to-checkpoint", "from": "engine", "to": "checkpoint", "label": "from_pretrained" },
+    { "id": "engine-to-cache", "from": "engine", "to": "cache", "label": "predictions", "variant": "dashed" },
+    { "id": "baselines-to-cache", "from": "baselines", "to": "cache", "label": "fitted artifacts", "variant": "dashed" },
+    { "id": "baselines-to-train", "from": "baselines", "to": "train_split", "label": "train split" },
+    { "id": "llm-to-endpoint", "from": "llm", "to": "llm_endpoint", "label": "POST /chat/completions", "variant": "security" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The operator journey",
+      "items": [
+        "The UI posts to /api/panel; the backend slices the fixture once so every system scores identical items in identical order",
+        "POST /api/route classifies one text against an arbitrary label set, capped at 512 labels",
+        "POST /api/schema-swap hands the model one app's half of a disjoint split, seeded so it reproduces"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "One engine, loaded once",
+      "items": [
+        "The checkpoint loads lazily on first inference, so /api/health answers while ~1.9 GB is still being read",
+        "CUDA fp16 on Turing; the CPU fallback is ~9x slower at 77 labels, and the UI says so instead of pretending",
+        "Attention is not forced: the checkpoint config decides, and /api/health reports what transformers resolved rather than a policy nobody applied"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Honest arms",
+      "items": [
+        "A system that cannot run lands in unavailable with a reason; it is never dropped and never invents a number",
+        "A null cost is not $0.00 — the panel says free, priced or unpriced, because those are three different claims",
+        "The majority-class floor row is always kept, and macro-F1 is reported next to accuracy"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Offline setup and the gates",
+      "items": [
+        "fetch_model.py resumes the checkpoint download; fetch_fixtures.py --with-train writes the two train splits",
+        "Only banking77 and clinc150 ship a train split, so the supervised arms report unavailable elsewhere",
+        "87 offline tests need no GPU, weights or network; the CUDA and model-card gates stay local and are never promoted into CI"
+      ]
+    }
+  ]
+}
