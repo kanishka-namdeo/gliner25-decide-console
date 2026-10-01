@@ -18,10 +18,23 @@ import time
 from pathlib import Path
 
 REPO_ID = "fastino/GLiNER2.5-Decide"
-# Prefer the locally fetched copy: the Hub download is resumable via
-# scripts/fetch_model.py, whereas from_pretrained(restarts from zero.
+# Require the local copy rather than falling back to the Hub id: from_pretrained
+# would restart the ~1.9 GB download from zero on any interruption, which on a
+# slow link never completes. scripts/fetch_model.py downloads with range resume.
 LOCAL = Path("models") / REPO_ID.split("/")[-1]
-MODEL_ID = str(LOCAL.as_posix()) if (LOCAL / "config.json").exists() else REPO_ID
+
+if not (LOCAL / "config.json").exists():
+    print("=" * 72)
+    print("MODEL WEIGHTS NOT FOUND")
+    print("=" * 72)
+    print(f"Expected: {LOCAL / 'config.json'}")
+    print("\nFetch them first (resumable, ~1.9 GB):")
+    print(f"    python scripts/fetch_model.py {REPO_ID}")
+    print("\nThen re-run this script.")
+    print("=" * 72)
+    raise SystemExit(2)
+
+MODEL_ID = str(LOCAL.as_posix())
 
 # Verbatim from the model card.
 SINGLE_EXAMPLE = (
