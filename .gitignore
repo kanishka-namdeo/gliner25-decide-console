@@ -1,0 +1,51 @@
+# --- secrets: never commit credentials ---------------------------------
+.env
+.env.*
+!.env.example
+
+# --- python / venv ------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- build --------------------------------------------------------------
+build/
+dist/
+*.egg-info/
+
+# --- model weights: re-downloaded by scripts/fetch_model.py ------------
+models/
+*.safetensors
+*.bin
+*.onnx
+
+# --- vendored wheels: CUDA build artifacts, not source -----------------
+vendor/
+
+# --- generated at run time ---------------------------------------------
+results/
+# Trimmed dataset fixtures come from scripts/fetch_fixtures.py. The CSVs are
+# derived data, not source. Remove these two lines if you would rather ship
+# them so the repo runs fully offline.
+data/fixtures/*.csv
+data/fixtures/*.json
+data/raw/
+
+# --- editors / OS ------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- logs ---------------------------------------------------------------
+*.log

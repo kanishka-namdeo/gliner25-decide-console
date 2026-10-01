@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Offline checks: statistics, LLM reply parsing, import wiring.
+  # Runs without a GPU or network so it is fast and always meaningful.
+  tests:
+    name: tests (cpu, no network)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install project and test dependencies
+        run: uv sync --extra dev
+
+      - name: Run tests
+        run: uv run pytest tests -q
+
+  # Catches the two dependency traps this project has: transformers 5.x breaks
+  # gliner2, and the default PyPI torch wheel is CPU-only. Neither shows up in a
+  # CPU test run, so this job resolves the real CUDA wheel.
+  resolution:
+    name: cuda wheels resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Resolve against the pinned CUDA index
+        run: uv sync --extra dev
+
+      - name: Confirm a CUDA torch build was selected
+        run: |
+          uv run python - <<'PY'
+          import sys
+          import torch
+          print("torch:", torch.__version__)
+          print("cuda build:", torch.version.cuda)
+          assert torch.version.cuda is not None, (
+              "resolved a CPU-only torch wheel; the PyPI Windows wheel is CPU-only "
+              "and [tool.uv.sources] must point at download.pytorch.org"
+          )
+          PY
+
+      - name: Confirm the gliner2 transformers cap still holds
+        run: |
+          uv run python - <<'PY'
+          from importlib.metadata import version
+          v = version("transformers")
+          print("transformers:", v)
+          assert v.startswith("4."), (
+              f"transformers {v} installed, but gliner2 2.0.0 pins <5"
+          )
+          PY

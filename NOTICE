@@ -1,0 +1,71 @@
+GLiNER2.5-Decide Console
+Copyright 2026 Kanishka Namdeo
+
+This product includes software developed by third parties.
+
+--------------------------------------------------------------------------------
+Pre-trained model
+--------------------------------------------------------------------------------
+
+GLiNER2.5-Decide
+  Copyright (c) Fastino Labs
+  Source: https://huggingface.co/fastino/GLiNER2.5-Decide
+  License: Apache License 2.0
+  Paper:   Zaratiana et al., "GLiNER2: An Efficient Multi-Task Information
+           Extraction System with Schema-Driven Interface" (arXiv:2507.18546)
+
+  The model weights are NOT distributed with this repository. They are
+  downloaded on demand from Hugging Face by scripts/fetch_model.py. The
+  checkpoint is licensed by its authors under Apache-2.0; this repository's
+  license does not relicense those weights.
+
+  Base encoder: microsoft/deberta-v3-large, which is itself licensed
+  Apache-2.0 by Microsoft.
+
+--------------------------------------------------------------------------------
+Python dependencies
+--------------------------------------------------------------------------------
+
+  gliner2                     Apache-2.0   Fastino Labs
+  torch                       BSD-3-Clause  PyTorch Foundation
+  transformers                Apache-2.0   Hugging Face
+  datasets                    Apache-2.0   Hugging Face
+  scikit-learn                BSD-3-Clause  PyData
+  fastapi                     MIT
+  uvicorn                     BSD-3-Clause  Encode OSS Ltd
+  httpx                       BSD-3-Clause  Encode OSS Ltd
+  numpy                       BSD-3-Clause  NumPy developers
+
+--------------------------------------------------------------------------------
+Evaluation datasets
+--------------------------------------------------------------------------------
+
+No dataset content is redistributed with this repository. scripts/fetch_fixtures.py
+downloads trimmed samples from these public datasets at run time:
+
+  banking77        DeepPavlov/banking77         see dataset card for terms
+  clinc150         DeepPavlov/clinc150         original: Larson et al., EMNLP-IJCNLP 2019
+  hate_speech      tdavidson/hate_speech_offensive   Davidson et al. 2017
+  enron_spam       SetFit/enron_spam            Enron corpus, publicly released
+  yelp             bespokelabs/yelp_restaurant_reviews_5k   Yelp
+
+--------------------------------------------------------------------------------
+Methodology reference
+--------------------------------------------------------------------------------
+
+The evaluation protocol (exact-set match, bootstrap confidence intervals,
+paired bootstrap, exact McNemar, the disjoint-schema transfer test) follows:
+
+  Rodrigues, C. & Vas, O., "When Do LLMs Replace Fine-Tuned NLU? A Decision
+  Framework for Intent Detection in Production Conversational Systems"
+  arXiv:2608.20371
+
+--------------------------------------------------------------------------------
+Disclaimer
+--------------------------------------------------------------------------------
+
+This is an evaluation and demonstration tool. Reported accuracies are measured
+on the specific datasets and label sets described in the README, are specific to
+the hardware and versions listed there, and do not predict performance on your
+data. The authors of the underlying model provide the weights as-is; consult
+their model card and documentation before production use.

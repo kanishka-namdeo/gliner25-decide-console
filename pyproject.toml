@@ -1,0 +1,78 @@
+[project]
+name = "gliner25-decide-console"
+version = "0.1.0"
+description = "Evaluation console for GLiNER2.5-Decide: schema-driven decisions benchmarked against fine-tuned encoders and an LLM, with bootstrap CIs and a disjoint-schema transfer test"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12,<3.14"
+keywords = [
+    "gliner",
+    "named-entity-recognition",
+    "text-classification",
+    "intent-classification",
+    "zero-shot",
+    "model-evaluation",
+    "information-extraction",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+]
+dependencies = [
+    # Schema-driven extraction/classification library.
+    # 2.0.0 hard-pins transformers<5, torch<3, numpy<3.
+    "gliner2[local]==2.0.0",
+    # Pinned <5 because of the gliner2 cap. Current 4.x is 4.57.6;
+    # transformers 5.x will not work with gliner2 2.0.0.
+    "transformers>=4.57.6,<5",
+    # Resolved from the dedicated CUDA index below, not from PyPI
+    # (the default PyPI Windows wheel is CPU-only).
+    "torch>=2.14.1",
+    "scikit-learn>=1.9.1",
+    "fastapi>=0.142.2",
+    "uvicorn>=0.54.0",
+    "httpx>=0.28",
+    # Fixture downloader only. We deliberately do NOT use gliner2's
+    # [benchmark] extra, which would cap datasets<5.
+    "datasets>=5.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[project.urls]
+"Model weights" = "https://huggingface.co/fastino/GLiNER2.5-Decide"
+"Library" = "https://github.com/fastino-ai/GLiNER2"
+"Methodology reference" = "https://arxiv.org/abs/2608.20371"
+
+# cu126 chosen for compute capability 7.5 (Turing): conservative on
+# compiled-arch coverage. cu130 also lists Turing but trims older archs.
+# Switching backends is a one-line change here.
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # gliner2 2.0.0 calls torch.jit.script at import time; harmless here.
+    "ignore::FutureWarning:torch.jit._script",
+]

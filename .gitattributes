@@ -1,0 +1,24 @@
+# Normalise line endings in the repository; let git restore them on checkout.
+# Without this, Windows clones produce CRLF and diffs show whole-file changes.
+* text=auto eol=lf
+
+# Files that must stay LF regardless of platform.
+*.py text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+
+# Binary: never touched by line-ending conversion.
+*.safetensors binary
+*.bin binary
+*.onnx binary
+*.joblib binary
+*.whl binary
+*.png binary
+*.jpg binary
+*.pdf binary
